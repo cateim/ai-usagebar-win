@@ -16,13 +16,13 @@
             <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
 
             <!-- Palette mirrors the original Win32 dark theme. -->
-            <SolidColorBrush x:Key="BgBrush" Color="#16171D" />
-            <SolidColorBrush x:Key="CardBrush" Color="#262934" />
-            <SolidColorBrush x:Key="LineBrush" Color="#2E3140" />
-            <SolidColorBrush x:Key="TextBrush" Color="#E7E9F0" />
-            <SolidColorBrush x:Key="MutedBrush" Color="#9AA0B4" />
-            <SolidColorBrush x:Key="AccentBrush" Color="#6D8BFF" />
-            <SolidColorBrush x:Key="TrackBrush" Color="#333745" />
+            <SolidColorBrush x:Key="BgBrush" Color="#17181A" />
+            <SolidColorBrush x:Key="CardBrush" Color="#232427" />
+            <SolidColorBrush x:Key="LineBrush" Color="#303236" />
+            <SolidColorBrush x:Key="TextBrush" Color="#E8E9EA" />
+            <SolidColorBrush x:Key="MutedBrush" Color="#A6A7AA" />
+            <SolidColorBrush x:Key="AccentBrush" Color="#8A8D93" />
+            <SolidColorBrush x:Key="TrackBrush" Color="#2B2D30" />
             <SolidColorBrush x:Key="DangerBrush" Color="#FF8A80" />
         </ResourceDictionary>
     </Application.Resources>

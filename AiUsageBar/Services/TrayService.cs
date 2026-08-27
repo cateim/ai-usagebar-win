@@ -29,16 +29,16 @@ public sealed class TrayService : IDisposable
     public void Init()
     {
         _icon.ToolTipText = "ai-usagebar - loading…";
-        _icon.Icon = TrayIconFactory.For(Severity.Unknown);
+        _icon.Icon = TrayIconFactory.For(Severity.Unknown, null);
         var toggle = new RelayCommand(() => Clicked?.Invoke());
         _icon.LeftClickCommand = toggle;
         _icon.RightClickCommand = toggle;
         _icon.ForceCreate();
     }
 
-    public void Update(Severity severity, string tooltip)
+    public void Update(Severity severity, string tooltip, int? percent = null)
     {
-        _icon.Icon = TrayIconFactory.For(severity);
+        _icon.Icon = TrayIconFactory.For(severity, percent);
         _icon.ToolTipText = ClampTooltip(tooltip);
     }
 

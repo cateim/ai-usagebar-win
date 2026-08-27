@@ -94,8 +94,16 @@ public partial class PopupWindow : Window
         VendorsList.ItemsSource = model.Vendors;
     }
 
+    /// <summary>Set to 1 to stop the popup from hiding when it loses focus.
+    /// Auto-hide makes the popup impossible to screenshot: focusing a terminal to
+    /// run a capture command dismisses the very window being captured. Opt-in and
+    /// absent in normal use.</summary>
+    private const string PinVariable = "AIUSAGEBAR_WIN_PIN_POPUP";
+
     private void OnDeactivated(object? sender, EventArgs e)
     {
+        if (Environment.GetEnvironmentVariable(PinVariable) == "1") return;
+
         // Grace period so the activating click does not instantly dismiss.
         if ((DateTimeOffset.UtcNow - _shownAt).TotalMilliseconds < 400) return;
         HidePopup();

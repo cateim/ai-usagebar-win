@@ -7,7 +7,10 @@ namespace AiUsageBar.Services;
 
 public static class Renderer
 {
-    public sealed record Rendered(Severity Severity, string Tooltip);
+    /// <summary>What the tray needs: the colour (Severity), the hover text, and
+    /// how full the ring should be. Percent is null when nothing measurable was
+    /// reported, which draws an empty ring rather than a misleading full one.</summary>
+    public sealed record Rendered(Severity Severity, string Tooltip, int? Percent);
 
     public static Rendered Render(UsageJsonRoot root, Config cfg, DateTimeOffset now)
     {
@@ -75,7 +78,7 @@ public static class Renderer
             ? "ai-usagebar - no models configured"
             : string.Join("\n", tipLines);
 
-        return new Rendered(worstSeverity, tooltip);
+        return new Rendered(worstSeverity, tooltip, WorstPercent(root, primaryId));
     }
 
     private static IEnumerable<UsageJsonEntry> Ordered(List<UsageJsonEntry> entries, string? primaryId)
@@ -95,6 +98,20 @@ public static class Renderer
         => entry.Status == "ready"
         || entry.Id == primaryId
         || entry.Id == UsageJsonEntry.SystemId;
+
+    /// <summary>Highest percentage among the metrics actually on show, which is
+    /// the same number the worst severity came from. Null when there is nothing
+    /// to measure, so the tray ring stays empty instead of implying zero usage.</summary>
+    private static int? WorstPercent(UsageJsonRoot root, string primaryId)
+    {
+        var percentages = root.Entries
+            .Where(e => ShouldShow(e, primaryId) && e.Status == "ready")
+            .SelectMany(e => e.Metrics ?? new List<UsageJsonMetric>())
+            .Select(m => m.Percent)
+            .ToList();
+
+        return percentages.Count == 0 ? null : Math.Clamp(percentages.Max(), 0, 100);
+    }
 
     /// <summary>Whether any vendor actually reported usage. False on a machine
     /// where nothing is signed in, and equally false when every request failed.</summary>

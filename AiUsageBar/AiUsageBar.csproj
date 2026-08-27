@@ -21,7 +21,7 @@
          restarting at 1 whenever the year or month changes. This is the single
          source of truth: AssemblyVersion and FileVersion are derived from it,
          and the release tag is this value prefixed with "v". -->
-    <Version>2026.8.5</Version>
+    <Version>2026.8.6</Version>
 
     <!-- Distribution is a single self-contained .exe, but those flags
          (SelfContained / PublishSingleFile / RID) are passed ONLY on the publish
@@ -29,6 +29,13 @@
          unconditionally would force a RID on every `dotnet build`/`dotnet test`
          and break them. Plain build/test stays framework-dependent. -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ApplicationIcon embeds this as the executable's icon, which covers
+         Explorer, the taskbar and Alt+Tab. Listing it as a Resource as well is
+         what lets XAML reach it through pack://, for the custom title bar. -->
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- The Rust CLI, bundled so a fresh install needs no `cargo install`.

@@ -3,6 +3,34 @@
 Versions follow CalVer (`YEAR.MONTH.REVISION`). Earlier entries use the
 SemVer scheme this project shipped with before the rewrite.
 
+## 2026.8.6
+
+### Added
+- Settings can now set the **API key** for every provider that uses one, eleven
+  of them, instead of telling you to edit `config.toml` by hand. Each field says
+  whether a key is already saved, or whether it is coming from an environment
+  variable, which takes precedence. Existing keys are never shown back, so a
+  blank field means "keep it"; removing one is an explicit Clear. The writing is
+  done by the CLI, so comments and unrelated settings in the file are preserved.
+- The provider list in Settings now comes from the CLI, so providers added
+  upstream show up without a change here.
+
+### Changed
+- **The tray icon is now a gauge.** Its ring fills clockwise with how much of the
+  quota is gone, so a glance at the notification area answers "how much is left?"
+  and not only "is it bad?". Colour still tracks severity.
+- New application icon: an AI sparkle inside a ring split into the same severity
+  bands the app uses (green below 50%, amber to 75%, orange to 90%, red above).
+  The previous bar chart said nothing about what the app measures.
+- The settings window shows the app icon in its title bar, which the custom
+  title bar did not inherit from the executable.
+- The interface is no longer tinted blue. Every grey was pulling toward blue,
+  some by a wide margin; they are neutral now. The usage bars keep their green,
+  amber and red.
+- API keys sit in a collapsed section, so the settings window opens on the three
+  options most people actually change instead of eleven key fields.
+- Screenshots in the README were redone from the current build.
+
 ## 2026.8.5
 
 ### Changed

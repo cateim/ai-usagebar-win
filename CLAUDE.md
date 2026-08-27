@@ -55,7 +55,9 @@ AiUsageBar/
     Interop.cs             JSON contract for `ai-usagebar usage --json`
     ViewModels.cs          popup and settings view-models bound by XAML
   Services/
-    Config.cs              TOML load/save (poll interval, UI primary)
+    CliBinary.cs           resolves the bundled CLI, extracting it on first use
+    CliSettings.cs         `settings show` / `settings apply` (primary, API keys)
+    Config.cs              TOML load/save for poll_seconds, this app's own file
     Poller.cs              background polling loop, runs the Rust CLI
     Renderer.cs            JSON to tooltip / popup / settings models
     TrayIconFactory.cs     severity-tinted tray icon drawn in code
@@ -70,7 +72,11 @@ AiUsageBar/
   ci.yml                   restore + build on push to master and on PRs
   release.yml              publish single-file .exe to a GitHub Release
 scripts/
+  release.ps1              bump, commit, tag and push a release in one step
   check-cli-contract.ps1   verifies the installed CLI still matches Interop.cs
+  generate-icon.py         draws Assets/app.ico (sparkle in a severity-banded ring)
+  capture-screenshots.ps1  captures the windows, redraws the tray tooltip
+  demo-usage.json          five-provider sample for AIUSAGEBAR_WIN_FIXTURE
 ```
 
 ## Build and run
@@ -79,10 +85,30 @@ Always pass `-p:Platform=x64` (or `arm64`). The project declares those two
 platforms only, and every command in CI and in the README specifies one.
 
 ```powershell
+# Close a running instance first: it locks the .exe and the build fails with MSB3027.
+Stop-Process -Name ai-usagebar-win -Force -ErrorAction SilentlyContinue
+
 dotnet restore AiUsageBar.sln
-dotnet build AiUsageBar.sln -c Release -p:Platform=x64
-dotnet run --project AiUsageBar/AiUsageBar.csproj -p:Platform=x64
+dotnet build AiUsageBar/AiUsageBar.csproj -c Debug -p:Platform=x64
+
+.\AiUsageBarind\Debug
+et8.0-windows10.0.19041.0i-usagebar-win.exe
 ```
+
+`dotnet run` does not work here. It looks for the output under `bin\Debug\`,
+while `Platform` puts it in `bind\Debug\`, so it fails with "cannot find the
+file". Run the produced `.exe` directly instead.
+
+If the app then reports a missing .NET Desktop Runtime, the SDK was installed
+privately (via `dotnet-install.ps1`) rather than by the official installer, and
+the launcher cannot find it. Point it at the install once:
+
+```powershell
+[Environment]::SetEnvironmentVariable('DOTNET_ROOT', "$env:LOCALAPPDATA\Microsoft\dotnet", 'User')
+```
+
+This affects local builds only. Releases are published `--self-contained`, so
+users never need a runtime installed.
 
 Or open `AiUsageBar.sln` in Visual Studio, set the platform to x64, press F5.
 
@@ -93,6 +119,19 @@ Released builds need none of this: see "Bundled CLI" below.
 
 `dotnet-install.ps1` at the root is the stock Microsoft SDK installer kept for
 convenience. CI does not use it (it uses `actions/setup-dotnet`).
+
+## Development helpers
+
+Two opt-in environment variables exist only to drive the UI into states that are
+awkward to reach on demand. Neither has any effect unless set.
+
+| Variable | Effect |
+|---|---|
+| `AIUSAGEBAR_WIN_FIXTURE` | Path to a JSON file rendered instead of running the CLI. `scripts/demo-usage.json` holds the five-provider sample used for the README screenshots. |
+| `AIUSAGEBAR_WIN_PIN_POPUP` | Set to `1` to stop the popup hiding on focus loss. Without it the popup cannot be screenshotted, since focusing a terminal dismisses it. |
+
+`scripts/capture-screenshots.ps1` captures the popup and settings windows and
+redraws the tray tooltip (the shell owns that one, so it cannot be captured).
 
 ## Tests
 
@@ -139,9 +178,13 @@ record which CLI version each build shipped.
 
 ## Tracking the upstream CLI
 
-Validated against **`ai-usagebar` 1.0.3**. The upstream moves fast (ten releases
-in the three weeks before that version, including a `0.22.0` to `1.0.0` jump),
-so treat schema drift as expected rather than exceptional.
+Validated against **`ai-usagebar` 1.4.0**, with 1.7.0 current on crates.io at the
+time of writing. Upstream moves fast (ten releases in three weeks around 1.0.0),
+so treat schema drift as expected rather than exceptional. Note the contract
+check covers `usage --json` only: `CliSettings` also depends on the shape of
+`settings show` and on `settings apply` accepting `schema_version`, `primary` and
+`keys`, where each key entry is `{action: "set"|"clear", value}`. Re-check those
+by opening the settings window after an upstream jump.
 
 Update the CLI and re-check the contract:
 
@@ -179,6 +222,21 @@ at 1 whenever the year or month changes.
 to name the artifact and tag the release.
 
 ### Release procedure
+
+Use the script. It exists because every step below has been forgotten at least
+once by hand:
+
+```powershell
+pwsh -File scripts/release.ps1 -Message "feat(ui): what changed"
+pwsh -File scripts/release.ps1 -Message "..." -DryRun   # print, change nothing
+```
+
+It refuses to run outside master, refuses to publish a version `CHANGELOG.md`
+does not document, reuses a hand-made bump instead of skipping ahead, and asks
+for the tag to be typed back before pushing. If you stop at that prompt, the
+commit and tag stay local and it tells you how to push or undo them.
+
+The manual sequence it replaces, for reference:
 
 **A version bump is not done until the tag is pushed.** Bumping `<Version>` on
 its own produces nothing anyone can download: the artifact exists only after the
@@ -269,11 +327,18 @@ Rust CLI, which stores credentials there. Saving through a plain model would
 delete the user's API keys, so saving goes through a `TomlTable` that keeps
 properties the C# model does not know about.
 
-**The CLI has an API for native frontends.** `ai-usagebar settings show` prints
-non-secret JSON including a `configured` flag per vendor, `primary`, and
-`primary_choices`; `ai-usagebar settings apply` accepts a JSON patch on stdin.
-The settings window currently writes the TOML directly instead. Migrating to
-these commands would remove the C# side's knowledge of the file format.
+**Provider settings go through the CLI, not through Tomlyn.** `CliSettings`
+wraps `ai-usagebar settings show` (non-secret metadata: `primary`,
+`primary_choices`, and a `configured` flag per vendor) and `settings apply`
+(a JSON patch on stdin). Two reasons it must stay that way: the CLI writes with
+`toml_edit`, preserving comments and keys we know nothing about, and it validates
+field names, so the app cannot brick the config the way a stray `poll_seconds`
+once did. `Config.cs` still owns `poll_seconds`, which is ours alone.
+
+**Never log or pass an API key as an argument.** Keys travel to the CLI only on
+stdin, so they stay out of the process list. `settings show` never returns a key
+value, only whether one exists, so the settings window cannot display existing
+keys: a blank field means "unchanged", and clearing is an explicit action.
 
 **Windows only.** WPF requires Windows 10 2004 (19041) or later. There is no
 cross-platform build.

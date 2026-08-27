@@ -16,36 +16,47 @@ dark theme, modern controls). The tray icon uses
 [`Tomlyn`](https://github.com/xoofx/Tomlyn). The popup and settings windows
 are native XAML.
 
+## Install
+
+1. Download `ai-usagebar-win-<version>-x64.exe` from the
+   [latest release](https://github.com/CaTeIM/ai-usagebar-win/releases/latest).
+2. Run it. An icon appears in the notification area, next to the clock.
+3. Sign in to a provider once, if you have not already: run `claude` (or
+   `codex`) in a terminal and complete its login. That login is what the app
+   reads.
+
+That is the whole installation. There is no installer, no runtime to add and no
+separate download.
+
+**You do not need Rust or `cargo`.** The release carries the `ai-usagebar`
+binary inside the `.exe` and unpacks it on first use.
+
+Requirements: Windows 10 version 2004 (build 19041) or later.
+
+Usage shows up on the next refresh, within a minute. Before any provider is
+signed in, the popup tells you what is missing instead of showing usage.
+
+### Updating
+
+Download the newer `.exe` and replace the old one. Settings and credentials live
+outside the executable, so nothing is lost.
+
 ## How it works
 
-This app does **not** call AI provider APIs directly. It periodically executes
-`ai-usagebar usage --json` (the Rust CLI installed via `cargo`) and parses the
-JSON output into WPF view-models. All provider configuration, credential
-management and API communication are handled by the Rust binary.
-
-## Prerequisites
-
-- Provider credentials configured as described in the
-  [`ai-usagebar`](https://github.com/akitaonrails/ai-usagebar) README. Running
-  the official `claude` or `codex` CLI once is enough for those providers.
-
-You do **not** need Rust or `cargo install`: released builds bundle the
-`ai-usagebar` binary and extract it on first use. If you already have your own
-copy on `PATH`, the bundled one still takes precedence, so everyone runs the
-version each release was tested against.
-
-Building from source is the exception: a local build does not bundle the CLI and
-expects `ai-usagebar` on `PATH` (`cargo install ai-usagebar`).
+This app does **not** call AI provider APIs and never touches your credentials.
+It periodically runs `ai-usagebar usage --json`, the Rust CLI it ships with, and
+renders the JSON that comes back. Every provider request, credential file and
+API key is handled by that binary.
 
 ## Screenshots
 
 | Popup - click the tray icon | Tray tooltip - hover |
 | :---: | :---: |
-| <img src="screenshots/click.PNG" alt="Popup with per-provider usage cards" width="300"> | <img src="screenshots/hover.PNG" alt="Tray tooltip, one line per provider" width="220"> |
+| <img src="screenshots/click.png" alt="Popup with per-provider usage cards" width="300"> | <img src="screenshots/hover.png" alt="Tray tooltip, one line per provider" width="220"> |
 
 | Settings |
 | :---: |
-| <img src="screenshots/settings.PNG" alt="Settings window" width="440"> |
+| <img src="screenshots/settings.png" alt="Settings window" width="440"> |
 
 ## UI
 
@@ -53,7 +64,9 @@ expects `ai-usagebar` on `PATH` (`cargo install ai-usagebar`).
 - **Click** the tray icon for a popup with a card and progress bars per
   provider.
 - **Settings** (button in the popup) opens a window to set the refresh
-  interval, choose the primary provider, and toggle **Start with Windows**.
+  interval, choose the primary provider, toggle **Start with Windows**, and
+  enter the **API key** for any provider that uses one. Providers that sign in
+  through their own CLI, like Claude and Codex, need no key.
 - **Quit** (button in the popup) exits the whole process.
 
 The icon color tracks worst-case usage: green <50%, yellow >=50%, orange >=75%,
@@ -72,45 +85,83 @@ Keep `poll_seconds` out of the CLI's file. The CLI rejects unknown top-level
 keys and refuses to parse the whole file, which leaves the app showing only a
 System Error.
 
-All other settings (providers, API keys, credentials) are managed by the
-`ai-usagebar` Rust CLI. Use `Settings > Open config.toml` or edit the file
-manually. "Start with Windows" lives in the per-user `HKCU\...\Run` registry
-key.
+API keys and the primary provider are written by the `ai-usagebar` CLI itself,
+through its `settings apply` command, so comments and any keys this app does not
+know about survive untouched. Keys are never displayed back: a blank field means
+"leave it as it is". If a provider's key comes from an environment variable, the
+window says so, because that value wins over anything saved in the file.
 
-## Build
+"Start with Windows" lives in the per-user `HKCU\...\Run` registry key.
+
+## Build (contributors only)
+
+Nothing in this section is needed to *use* the app. It applies only to building
+from source.
 
 Requires:
 
 - **.NET 8 SDK**
 - **Windows 10 2004 (19041) or later** - WPF is Windows-only.
+- **`ai-usagebar` on `PATH`** (`cargo install ai-usagebar`). This is the one
+  case where Rust is needed: a local build does not bundle the CLI, unlike a
+  release, so it falls back to whatever is on `PATH`.
 - Optional: **Visual Studio 2022** with the *.NET Desktop Development* workload.
 
 ```powershell
-# from the repo root
-dotnet restore AiUsageBar.sln
-dotnet build  AiUsageBar.sln -c Release -p:Platform=x64
+# Close a running instance first: it locks the .exe and the build fails with MSB3027.
+Stop-Process -Name ai-usagebar-win -Force -ErrorAction SilentlyContinue
 
-# run
-dotnet run --project AiUsageBar/AiUsageBar.csproj -p:Platform=x64
+dotnet restore AiUsageBar.sln
+dotnet build AiUsageBar/AiUsageBar.csproj -c Debug -p:Platform=x64
+
+.\AiUsageBarind\Debug
+et8.0-windows10.0.19041.0i-usagebar-win.exe
 ```
+
+`dotnet run` does not work here. It looks for the output under `bin\Debug\`,
+while `Platform` puts it in `bind\Debug\`, so it fails with "cannot find the
+file". Run the produced `.exe` directly instead.
+
+If the app then reports a missing .NET Desktop Runtime, the SDK was installed
+privately (via `dotnet-install.ps1`) rather than by the official installer, and
+the launcher cannot find it. Point it at the install once:
+
+```powershell
+[Environment]::SetEnvironmentVariable('DOTNET_ROOT', "$env:LOCALAPPDATA\Microsoft\dotnet", 'User')
+```
+
+This affects local builds only. Releases are published `--self-contained`, so
+users never need a runtime installed.
 
 Or open `AiUsageBar.sln` in Visual Studio, set the platform to **x64**, and
 press F5.
 
-## Deploy
+## Releasing (maintainers only)
 
-WPF publishes to a **single self-contained `.exe`** that runs on a clean
-machine. The self-contained / single-file / RID flags are passed at *publish*
-time only:
+Bump `<Version>` in `AiUsageBar/AiUsageBar.csproj`, add the matching
+`CHANGELOG.md` section, commit, then:
 
 ```powershell
-dotnet publish AiUsageBar/AiUsageBar.csproj -c Release -p:Platform=x64 `
-  -r win-x64 --self-contained true -p:PublishSingleFile=true
+git tag v<version>
+git push origin v<version>
 ```
 
-Pushing a version tag (e.g. `git tag v2026.8.1 && git push origin v2026.8.1`)
-runs the `release` GitHub Actions workflow, which publishes the build and
-attaches the `.exe` to a GitHub Release.
+Both lines are required: `git tag` only creates it locally, and the push is what
+triggers the workflow. Nothing is published until the tag is pushed.
+
+The `release` workflow then, on the runner:
+
+1. compiles the current `ai-usagebar` from crates.io,
+2. checks that CLI against this app's JSON contract and **fails the release** if
+   it no longer matches,
+3. embeds it and publishes a single self-contained `.exe`,
+4. records the bundled CLI version in the release notes.
+
+That is why picking up upstream fixes needs no manual step: each release pulls
+whatever is current. To catch a breaking change before publishing rather than
+after, run `pwsh ./scripts/check-cli-contract.ps1` locally first, against a CLI
+updated with `cargo install ai-usagebar --force`. That is optional, and it is
+the only reason a maintainer would install Rust.
 
 On first run the app adds a **Start Menu shortcut** (per-user, no admin needed),
 so you can find it from Windows Search by typing "AI Usage Bar". Only one

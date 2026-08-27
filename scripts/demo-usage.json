@@ -1,0 +1,101 @@
+{
+  "primary": "anthropic",
+  "entries": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "display_name": "Anthropic",
+      "plan": "Max 20x",
+      "status": "ready",
+      "stale": false,
+      "error": null,
+      "fetched_at": "2026-08-27T18:00:00Z",
+      "metrics": [
+        { "label": "Session (5h)", "value": "47%", "percent": 47, "severity": "low", "detail": "2h 12m", "reset_at": null },
+        { "label": "Weekly", "value": "78%", "percent": 78, "severity": "high", "detail": "3d 3h", "reset_at": null },
+        { "label": "Sonnet (weekly)", "value": "23%", "percent": 23, "severity": "low", "detail": "3d 3h", "reset_at": null }
+      ],
+      "sections": [
+        { "type": "metric", "label": "Session (5h)", "value": "47%", "percent": 47, "severity": "low", "detail": "2h 12m", "reset_at": null },
+        { "type": "metric", "label": "Weekly", "value": "78%", "percent": 78, "severity": "high", "detail": "3d 3h", "reset_at": null },
+        { "type": "metric", "label": "Sonnet (weekly)", "value": "23%", "percent": 23, "severity": "low", "detail": "3d 3h", "reset_at": null },
+        { "type": "fact", "text": "Extra usage: $12.50 / $50.00 (25%)" }
+      ]
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "display_name": "OpenAI",
+      "plan": "Plus",
+      "status": "ready",
+      "stale": false,
+      "error": null,
+      "fetched_at": "2026-08-27T18:00:00Z",
+      "metrics": [
+        { "label": "Session (5h)", "value": "91%", "percent": 91, "severity": "critical", "detail": "1h 4m", "reset_at": null },
+        { "label": "Weekly", "value": "64%", "percent": 64, "severity": "mid", "detail": "5d 8h", "reset_at": null },
+        { "label": "Code review", "value": "30%", "percent": 30, "severity": "low", "detail": "4d 23h", "reset_at": null }
+      ],
+      "sections": [
+        { "type": "metric", "label": "Session (5h)", "value": "91%", "percent": 91, "severity": "critical", "detail": "1h 4m", "reset_at": null },
+        { "type": "metric", "label": "Weekly", "value": "64%", "percent": 64, "severity": "mid", "detail": "5d 8h", "reset_at": null },
+        { "type": "metric", "label": "Code review", "value": "30%", "percent": 30, "severity": "low", "detail": "4d 23h", "reset_at": null },
+        { "type": "fact", "text": "Credits: $5.00" }
+      ]
+    },
+    {
+      "id": "zai",
+      "name": "Z.AI",
+      "display_name": "Z.AI",
+      "plan": "Coding Pro",
+      "status": "ready",
+      "stale": false,
+      "error": null,
+      "fetched_at": "2026-08-27T18:00:00Z",
+      "metrics": [
+        { "label": "Session (5h)", "value": "55%", "percent": 55, "severity": "mid", "detail": "3h 39m", "reset_at": null },
+        { "label": "Weekly", "value": "40%", "percent": 40, "severity": "low", "detail": "2d 5h", "reset_at": null },
+        { "label": "MCP (monthly)", "value": "12%", "percent": 12, "severity": "low", "detail": "17d 23h", "reset_at": null }
+      ],
+      "sections": [
+        { "type": "metric", "label": "Session (5h)", "value": "55%", "percent": 55, "severity": "mid", "detail": "3h 39m", "reset_at": null },
+        { "type": "metric", "label": "Weekly", "value": "40%", "percent": 40, "severity": "low", "detail": "2d 5h", "reset_at": null },
+        { "type": "metric", "label": "MCP (monthly)", "value": "12%", "percent": 12, "severity": "low", "detail": "17d 23h", "reset_at": null }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "display_name": "OpenRouter",
+      "plan": "OpenRouter",
+      "status": "ready",
+      "stale": false,
+      "error": null,
+      "fetched_at": "2026-08-27T18:00:00Z",
+      "metrics": [
+        { "label": "Credits used", "value": "37%", "percent": 37, "severity": "low", "detail": null, "reset_at": null }
+      ],
+      "sections": [
+        { "type": "metric", "label": "Credits used", "value": "37%", "percent": 37, "severity": "low", "detail": null, "reset_at": null },
+        { "type": "fact", "text": "Balance: $62.58" },
+        { "type": "fact", "text": "Spent today: $4.10" },
+        { "type": "fact", "text": "Key limit: $50.00" }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "display_name": "DeepSeek",
+      "plan": null,
+      "status": "ready",
+      "stale": false,
+      "error": null,
+      "fetched_at": "2026-08-27T18:00:00Z",
+      "metrics": [],
+      "sections": [
+        { "type": "fact", "text": "Balance: $14.20" },
+        { "type": "fact", "text": "Status: available" }
+      ]
+    }
+  ]
+}

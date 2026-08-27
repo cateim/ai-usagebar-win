@@ -124,7 +124,7 @@ public partial class App : Application
         _root = root;
 
         var rendered = Renderer.Render(root, cfg, DateTimeOffset.UtcNow);
-        _tray.Update(rendered.Severity, rendered.Tooltip);
+        _tray.Update(rendered.Severity, rendered.Tooltip, rendered.Percent);
 
         // Only the popup rebuilds live. The settings form is intentionally not
         // refreshed on every poll, which would clobber unsaved edits. It is

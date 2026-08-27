@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -52,8 +53,27 @@ public sealed class Poller : IDisposable
         }
     }
 
+    /// <summary>Environment variable pointing at a JSON file to render instead of
+    /// running the CLI. Used to drive the app through states that are hard to
+    /// reach on demand (many providers, a critical quota, stale data) for
+    /// screenshots and manual UI checks. Opt-in and absent in normal use.</summary>
+    private const string FixtureVariable = "AIUSAGEBAR_WIN_FIXTURE";
+
     private static async Task<UsageJsonRoot?> FetchJsonAsync(CancellationToken ct)
     {
+        var fixture = Environment.GetEnvironmentVariable(FixtureVariable);
+        if (!string.IsNullOrWhiteSpace(fixture))
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<UsageJsonRoot>(File.ReadAllText(fixture));
+            }
+            catch (Exception ex)
+            {
+                return ErrorRoot("Could not read " + FixtureVariable + " at " + fixture + ": " + ex.Message);
+            }
+        }
+
         try
         {
             var psi = new ProcessStartInfo

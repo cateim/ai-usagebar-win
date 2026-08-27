@@ -5,7 +5,7 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Title="AI Usage - Settings"
     Width="480"
-    Height="400"
+    Height="440"
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="Mica"
     WindowCornerPreference="Round"
@@ -18,7 +18,13 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="AI Usage - Settings" />
+        <!-- The custom title bar does not inherit the executable's icon the way a
+             stock window does, so it is set explicitly. -->
+        <ui:TitleBar Grid.Row="0" Title="AI Usage - Settings">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/Assets/app.ico" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
 
         <ScrollViewer Grid.Row="1" Padding="18" VerticalScrollBarVisibility="Auto">
             <StackPanel>
@@ -42,13 +48,36 @@
                     Foreground="{StaticResource TextBrush}"
                     Margin="0,4,0,16" />
 
-                <Border Background="{StaticResource CardBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,10">
-                    <StackPanel>
-                        <TextBlock Text="Providers Configuration" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" Margin="0,0,0,4" />
-                        <TextBlock Text="To add or remove providers, edit the underlying ai-usagebar config.toml file directly." Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12" />
-                        <ui:Button Content="Open config.toml" HorizontalAlignment="Left" Click="OnOpenConfig" />
+                <!-- Collapsed by default: eleven providers expanded would bury
+                     the three settings most people actually change. -->
+                <Expander x:Name="KeysExpander" Header="API keys" IsExpanded="False" Margin="0,4,0,10">
+                    <StackPanel Margin="0,10,0,0">
+                        <TextBlock
+                            Text="Leave a field blank to keep the current key. Claude and Codex sign in through their own CLI and need no key here."
+                            Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12" />
+
+                        <!-- Rows are built in code-behind: a PasswordBox cannot be
+                             data-bound, and each row needs its own reference. -->
+                        <StackPanel x:Name="KeysPanel" />
+
+                        <TextBlock
+                            x:Name="KeysUnavailableLabel"
+                            Text="The CLI did not report its settings, so keys cannot be edited here."
+                            Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"
+                            Visibility="Collapsed" />
+
+                        <ui:Button Content="Open config.toml" HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnOpenConfig" />
                     </StackPanel>
-                </Border>
+                </Expander>
+
+                <TextBlock
+                    x:Name="SaveErrorLabel"
+                    Foreground="{StaticResource DangerBrush}"
+                    FontSize="12"
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed"
+                    Margin="0,0,0,10" />
+
             </StackPanel>
         </ScrollViewer>
 

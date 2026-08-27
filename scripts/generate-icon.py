@@ -1,12 +1,17 @@
 """Generates AiUsageBar/Assets/app.ico from code, with no imaging dependency.
 
-The icon is three rising bars, matching the shape TrayIconFactory draws in the
-notification area, so the executable and the tray read as the same product. Bar
-colors reuse the severity palette (green, amber, red).
+The mark is an AI sparkle inside a thin progress ring: the sparkle says "AI",
+the ring says "how much of the quota is gone". A plain bar chart was rejected as
+too generic, and anything finer than this stops reading at 16px, which is the
+size that actually matters for a tray icon.
+
+TrayIconFactory draws the same silhouette in C#, tinted by severity, so the
+executable and the notification area match.
 
 Run: python scripts/generate-icon.py
 """
 
+import math
 import os
 import struct
 import zlib
@@ -15,16 +20,21 @@ SS = 4  # supersampling factor, for anti-aliasing
 SIZES = [16, 24, 32, 48, 64, 128, 256]
 OUT = os.path.join("AiUsageBar", "Assets", "app.ico")
 
-BG = (0x26, 0x26, 0x33, 255)      # dark rounded plate
-BARS = [
-    (0.40, (0x4c, 0xaf, 0x50, 255)),   # green
-    (0.62, (0xff, 0xc1, 0x07, 255)),   # amber
-    (0.85, (0xf4, 0x43, 0x36, 255)),   # red
+PLATE = (0x22, 0x23, 0x26, 255)   # dark rounded plate
+SPARK = (0xF2, 0xF3, 0xF5, 255)   # the sparkle
+
+# The ring is split into the app's real severity bands, the same cut-offs
+# SeverityRules.ForPct uses, so the icon states the scale it measures on:
+# green below 50%, amber to 75%, orange to 90%, red above.
+BANDS = [
+    (0, 50, (0x4C, 0xAF, 0x50, 255)),    # green
+    (50, 75, (0xFF, 0xC1, 0x07, 255)),   # amber
+    (75, 90, (0xFF, 0x98, 0x00, 255)),   # orange
+    (90, 100, (0xF4, 0x43, 0x36, 255)),  # red
 ]
 
 
 def blend(dst, i, color):
-    """Alpha-composite `color` over the pixel at byte index i."""
     sr, sg, sb, sa = color
     if sa == 255:
         dst[i:i + 4] = bytes((sr, sg, sb, 255))
@@ -36,11 +46,9 @@ def blend(dst, i, color):
 
 
 def rounded_rect(buf, w, x0, y0, x1, y1, r, color):
-    """Fill a rounded rectangle. Coordinates are in supersampled pixels."""
     for y in range(int(y0), int(y1)):
         for x in range(int(x0), int(x1)):
-            # Distance test only near the corners.
-            cx = None
+            cx = cy = None
             if x < x0 + r and y < y0 + r:
                 cx, cy = x0 + r, y0 + r
             elif x > x1 - r and y < y0 + r:
@@ -52,6 +60,31 @@ def rounded_rect(buf, w, x0, y0, x1, y1, r, color):
             if cx is not None and (x - cx) ** 2 + (y - cy) ** 2 > r * r:
                 continue
             blend(buf, (y * w + x) * 4, color)
+
+
+def arc(buf, w, h, cx, cy, r_in, r_out, a_start, a_end, color):
+    """Ring segment. Angles in degrees, 0 = twelve o'clock, growing clockwise."""
+    for y in range(h):
+        for x in range(w):
+            dx, dy = x - cx, y - cy
+            d = math.hypot(dx, dy)
+            if not (r_in <= d <= r_out):
+                continue
+            ang = math.degrees(math.atan2(dx, -dy)) % 360
+            if a_start <= ang <= a_end:
+                blend(buf, (y * w + x) * 4, color)
+
+
+def sparkle(buf, w, h, cx, cy, size, color, power=0.62):
+    """Four-pointed star with concave sides: the superellipse
+    |x|^power + |y|^power <= 1, which is the shape used for the AI sparkle."""
+    for y in range(int(cy - size), int(cy + size) + 1):
+        for x in range(int(cx - size), int(cx + size) + 1):
+            if not (0 <= x < w and 0 <= y < h):
+                continue
+            dx, dy = abs(x - cx) / size, abs(y - cy) / size
+            if dx ** power + dy ** power <= 1.0:
+                blend(buf, (y * w + x) * 4, color)
 
 
 def downsample(src, w, h, factor):
@@ -80,25 +113,20 @@ def downsample(src, w, h, factor):
 
 
 def render(size, plate=True):
-    """Draw one icon at `size` pixels. `plate` toggles the dark background."""
     w = h = size * SS
     buf = bytearray(w * h * 4)
 
     if plate:
-        rounded_rect(buf, w, 0, 0, w, h, w * 0.22, BG)
+        rounded_rect(buf, w, 0, 0, w, h, w * 0.22, PLATE)
 
-    # Three bars sharing a baseline, insets tuned to stay legible at 16px.
-    bar_w = w * 0.16
-    gap = w * 0.08
-    total = bar_w * 3 + gap * 2
-    x = (w - total) / 2
-    base = h * 0.80
-    radius = bar_w * 0.28
+    cx = cy = w / 2
+    r_out, r_in = w * 0.43, w * 0.375
 
-    for frac, color in BARS:
-        top = base - (h * 0.60) * frac / 0.85
-        rounded_rect(buf, w, x, top, x + bar_w, base, radius, color)
-        x += bar_w + gap
+    for start_pct, end_pct, color in BANDS:
+        arc(buf, w, h, cx, cy, r_in, r_out,
+            start_pct / 100 * 360, end_pct / 100 * 360, color)
+
+    sparkle(buf, w, h, cx, cy, w * 0.30, SPARK)
 
     return downsample(buf, w, h, SS)
 
