@@ -81,19 +81,28 @@ if ($branch -ne 'master') {
     Fail "on branch '$branch'. Releases are cut from master."
 }
 
+$xml = [xml](Get-Content $csproj)
+$current = @($xml.Project.PropertyGroup.Version | Where-Object { $_ })[0]
+if (-not $current) { Fail "no <Version> found in $csproj" }
+
 $dirty = (git status --porcelain) -join "`n"
 $hasLocalCommits = (git rev-list --count '@{u}..HEAD' 2>$null)
-if (-not $dirty -and ($hasLocalCommits -eq '0' -or -not $hasLocalCommits)) {
-    Fail "nothing to release: no pending changes and nothing unpushed."
+$currentIsTagged = [bool](git tag -l "v$current")
+
+# Three ways there is still work to do: uncommitted changes, commits not pushed,
+# or a version that was committed but never tagged. That last one is the easiest
+# to hit, because the commit makes it feel finished while nothing is published.
+if (-not $dirty -and ($hasLocalCommits -eq '0' -or -not $hasLocalCommits) -and $currentIsTagged) {
+    Fail "nothing to release: $current is already committed, pushed and tagged."
+}
+
+if (-not $dirty -and -not $currentIsTagged) {
+    Write-Host "     nothing to commit, but $current has no tag yet: publishing it" -ForegroundColor Yellow
 }
 
 # -- Version -----------------------------------------------------------------
 
 Step "Working out the version"
-
-$xml = [xml](Get-Content $csproj)
-$current = @($xml.Project.PropertyGroup.Version | Where-Object { $_ })[0]
-if (-not $current) { Fail "no <Version> found in $csproj" }
 
 $lastTag = (git tag -l 'v*' | ForEach-Object { $_.TrimStart('v') } |
     Where-Object { $_ -match '^\d+\.\d+\.\d+$' } |
@@ -157,8 +166,14 @@ if ($current -ne $next) {
 }
 
 Step "Committing"
-Run "git add -A"
-Run "git commit -m `"$Message`""
+
+# Re-read: writing the version may have dirtied an otherwise clean tree.
+if ((git status --porcelain) -join "`n") {
+    Run "git add -A"
+    Run "git commit -m `"$Message`""
+} else {
+    Write-Host "     nothing to commit, tagging the current commit"
+}
 
 Step "Tagging"
 Run "git tag $tag"
