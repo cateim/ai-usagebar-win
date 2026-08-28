@@ -50,13 +50,13 @@ API key is handled by that binary.
 
 ## Screenshots
 
-| Popup - click the tray icon | Tray tooltip - hover |
+| Popup - click the tray icon | Settings |
 | :---: | :---: |
-| <img src="screenshots/click.png" alt="Popup with per-provider usage cards" width="300"> | <img src="screenshots/hover.png" alt="Tray tooltip, one line per provider" width="220"> |
+| <img src="screenshots/click.png" alt="Popup with a card per provider, usage bars and reset times" width="270"> | <img src="screenshots/settings.png" alt="Settings window with refresh interval, primary provider and API key fields" width="365"> |
 
-| Settings |
+| Tray tooltip - hover |
 | :---: |
-| <img src="screenshots/settings.png" alt="Settings window" width="440"> |
+| <img src="screenshots/hover.png" alt="Tray tooltip, one line per provider" width="280"> |
 
 ## UI
 
@@ -114,13 +114,12 @@ Stop-Process -Name ai-usagebar-win -Force -ErrorAction SilentlyContinue
 dotnet restore AiUsageBar.sln
 dotnet build AiUsageBar/AiUsageBar.csproj -c Debug -p:Platform=x64
 
-.\AiUsageBarind\Debug
-et8.0-windows10.0.19041.0i-usagebar-win.exe
+.\AiUsageBar\bin\x64\Debug\net8.0-windows10.0.19041.0\ai-usagebar-win.exe
 ```
 
 `dotnet run` does not work here. It looks for the output under `bin\Debug\`,
-while `Platform` puts it in `bind\Debug\`, so it fails with "cannot find the
-file". Run the produced `.exe` directly instead.
+while `Platform` puts it in `bin\x64\Debug\`, so it fails with "cannot find
+the file". Run the produced `.exe` directly instead.
 
 If the app then reports a missing .NET Desktop Runtime, the SDK was installed
 privately (via `dotnet-install.ps1`) rather than by the official installer, and

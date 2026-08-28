@@ -72,6 +72,7 @@ AiUsageBar/
   ci.yml                   restore + build on push to master and on PRs
   release.yml              publish single-file .exe to a GitHub Release
 scripts/
+  sync-upstream.ps1        detect a newer ai-usagebar and release the catch-up
   release.ps1              bump, commit, tag and push a release in one step
   check-cli-contract.ps1   verifies the installed CLI still matches Interop.cs
   generate-icon.py         draws Assets/app.ico (sparkle in a severity-banded ring)
@@ -186,10 +187,22 @@ check covers `usage --json` only: `CliSettings` also depends on the shape of
 `keys`, where each key entry is `{action: "set"|"clear", value}`. Re-check those
 by opening the settings window after an upstream jump.
 
-Update the CLI and re-check the contract:
+Check whether the published app is behind upstream:
 
 ```powershell
-cargo install ai-usagebar --force
+pwsh -File scripts/sync-upstream.ps1
+```
+
+It compares three numbers: what crates.io publishes, what this machine has, and
+what the last GitHub Release bundled (read back from the release notes, the only
+record of it, since nothing pins the version). Add `-Release` to install the new
+CLI, verify the contract against it, write the changelog entry and publish. A
+failed contract check stops it before anything is committed.
+
+The steps it automates, if you need them by hand:
+
+```powershell
+cargo install ai-usagebar --force --locked
 ai-usagebar --version
 pwsh ./scripts/check-cli-contract.ps1
 ```
