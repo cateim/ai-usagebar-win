@@ -50,13 +50,13 @@ API key is handled by that binary.
 
 ## Screenshots
 
-| Popup - click the tray icon | Settings |
-| :---: | :---: |
+|                                          Popup - click the tray icon                                           |                                                             Settings                                                              |
+| :------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------: |
 | <img src="screenshots/click.png" alt="Popup with a card per provider, usage bars and reset times" width="270"> | <img src="screenshots/settings.png" alt="Settings window with refresh interval, primary provider and API key fields" width="365"> |
 
-| Tray tooltip - hover |
-| :---: |
-| <img src="screenshots/hover.png" alt="Tray tooltip, one line per provider" width="280"> |
+|                                  Tray tooltip - hover                                   |                                          App icon - the published .exe                                           |
+| :-------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------: |
+| <img src="screenshots/hover.png" alt="Tray tooltip, one line per provider" width="280"> | <img src="screenshots/app-icon.png" alt="The released executable in Explorer, showing the app icon" width="250"> |
 
 ## UI
 
@@ -95,7 +95,7 @@ window says so, because that value wins over anything saved in the file.
 
 ## Build (contributors only)
 
-Nothing in this section is needed to *use* the app. It applies only to building
+Nothing in this section is needed to _use_ the app. It applies only to building
 from source.
 
 Requires:
@@ -105,7 +105,7 @@ Requires:
 - **`ai-usagebar` on `PATH`** (`cargo install ai-usagebar`). This is the one
   case where Rust is needed: a local build does not bundle the CLI, unlike a
   release, so it falls back to whatever is on `PATH`.
-- Optional: **Visual Studio 2022** with the *.NET Desktop Development* workload.
+- Optional: **Visual Studio 2022** with the _.NET Desktop Development_ workload.
 
 ```powershell
 # Close a running instance first: it locks the .exe and the build fails with MSB3027.
@@ -137,8 +137,9 @@ press F5.
 
 ## Releasing (maintainers only)
 
-Bump `<Version>` in `AiUsageBar/AiUsageBar.csproj`, add the matching
-`CHANGELOG.md` section, commit, then:
+Close the changelog (rename `## [Unreleased]` to `## [<version>] - <YYYY-MM-DD>`,
+open a fresh empty `[Unreleased]`, update the footer links), bump `<Version>` in
+`AiUsageBar/AiUsageBar.csproj`, commit both, then:
 
 ```powershell
 git tag v<version>
@@ -169,22 +170,22 @@ reopens the popup. **Quit** (in the popup) closes it.
 
 ## Layout
 
-| Path | Purpose |
-|---|---|
-| `Models/Interop.cs` | JSON deserialization model for `ai-usagebar usage --json` |
-| `Models/ViewModels.cs` | popup + settings view-models bound by XAML |
-| `Services/Config.cs` | TOML config load/save (poll interval, UI primary) |
-| `Services/Poller.cs` | background polling loop - executes the Rust CLI |
-| `Services/Renderer.cs` | JSON results -> tooltip + popup/settings view-models |
-| `Services/TrayIconFactory.cs` | severity-tinted tray icon drawn in code |
-| `Services/TrayService.cs` | H.NotifyIcon wrapper |
-| `Services/StartupService.cs` | "Start with Windows" via the HKCU Run key |
-| `Services/ShortcutService.cs` | Start Menu shortcut so Search can find the app |
-| `Services/NativeMethods.cs` | Win32 interop (cursor position, DPI) |
-| `Views/PopupWindow.xaml` | frameless popup anchored near the tray |
-| `Views/SettingsWindow.xaml` | settings form (Fluent window) |
-| `App.xaml.cs` | tray-first app wiring; single-instance + shortcut on first run |
-| `Converters.cs` | XAML value converters (severity to brush, bool to visibility) |
+| Path                          | Purpose                                                        |
+| ----------------------------- | -------------------------------------------------------------- |
+| `Models/Interop.cs`           | JSON deserialization model for `ai-usagebar usage --json`      |
+| `Models/ViewModels.cs`        | popup + settings view-models bound by XAML                     |
+| `Services/Config.cs`          | TOML config load/save (poll interval, UI primary)              |
+| `Services/Poller.cs`          | background polling loop - executes the Rust CLI                |
+| `Services/Renderer.cs`        | JSON results -> tooltip + popup/settings view-models           |
+| `Services/TrayIconFactory.cs` | severity-tinted tray icon drawn in code                        |
+| `Services/TrayService.cs`     | H.NotifyIcon wrapper                                           |
+| `Services/StartupService.cs`  | "Start with Windows" via the HKCU Run key                      |
+| `Services/ShortcutService.cs` | Start Menu shortcut so Search can find the app                 |
+| `Services/NativeMethods.cs`   | Win32 interop (cursor position, DPI)                           |
+| `Views/PopupWindow.xaml`      | frameless popup anchored near the tray                         |
+| `Views/SettingsWindow.xaml`   | settings form (Fluent window)                                  |
+| `App.xaml.cs`                 | tray-first app wiring; single-instance + shortcut on first run |
+| `Converters.cs`               | XAML value converters (severity to brush, bool to visibility)  |
 
 ## License
 

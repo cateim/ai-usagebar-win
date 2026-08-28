@@ -140,15 +140,17 @@ if (git tag -l $tag) { Fail "tag $tag already exists. Delete it first, or pass -
 
 Step "Checking CHANGELOG.md"
 
-if (-not (Select-String -Path $changelog -SimpleMatch "## $next" -Quiet)) {
+if (-not (Select-String -Path $changelog -SimpleMatch "## [$next]" -Quiet)) {
     Fail @"
-CHANGELOG.md has no '## $next' section.
+CHANGELOG.md has no '## [$next]' section.
 
 Describe the release before publishing it: the notes are the only thing telling
-users what changed. Add the section, then run this again.
+users what changed. Rename the [Unreleased] heading to '## [$next] - <YYYY-MM-DD>',
+open a fresh empty [Unreleased] above it, add the two footer link references,
+then run this again.
 "@
 }
-Write-Host "     found '## $next'"
+Write-Host "     found '## [$next]'"
 
 # -- Apply -------------------------------------------------------------------
 

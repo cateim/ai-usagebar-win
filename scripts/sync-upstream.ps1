@@ -146,6 +146,55 @@ if (-not $behind -and -not $Force) {
     exit 0
 }
 
+# -- Refuse to publish over a dirty Unreleased -------------------------------
+
+# This runs before the Rust build on purpose: being refused after a five minute
+# cargo install is the kind of thing that gets a guard deleted.
+
+Step "Checking [Unreleased]"
+
+$changelog = 'CHANGELOG.md'
+$content = Get-Content $changelog -Raw
+
+$open = [regex]::Match($content, "(?m)^## \[Unreleased\][ 	]*$")
+if (-not $open.Success) {
+    Fail @"
+CHANGELOG.md has no '## [Unreleased]' section.
+
+The file is not in Keep a Changelog 1.1.0 shape, so this script cannot tell what
+is already pending. Add the section and run this again.
+"@
+}
+
+# The section runs until the next heading. The template note lives in an HTML
+# comment, which is not content, so it is stripped before deciding.
+$rest = $content.Substring($open.Index + $open.Length)
+$following = [regex]::Match($rest, "(?m)^## ")
+$pending = if ($following.Success) { $rest.Substring(0, $following.Index) } else { $rest }
+$pending = [regex]::Replace($pending, '(?s)<!--.*?-->', '').Trim()
+
+if ($pending) {
+    Fail @"
+[Unreleased] in CHANGELOG.md is not empty.
+
+This script publishes a release whose notes describe only the CLI bump, so
+everything sitting in [Unreleased] would ship inside that version without being
+documented as part of it. The changelog would then be wrong for good, because a
+published version is not rewritten.
+
+Close it first: rename '## [Unreleased]' to '## [<version>] - <YYYY-MM-DD>', open
+a fresh empty [Unreleased] above it, update the footer links, and publish that
+release. Then run this again for the CLI catch-up.
+
+Pending entries:
+
+$pending
+
+Nothing was installed, committed or published.
+"@
+}
+Write-Host "     empty, a CLI-only release is safe to publish"
+
 # -- Verify before publishing ------------------------------------------------
 
 if (-not $SkipLocalCheck) {
@@ -187,11 +236,10 @@ if ($current -like "$prefix*") {
 }
 $next = "$prefix$revision"
 
-$changelog = 'CHANGELOG.md'
-$content = Get-Content $changelog -Raw
+$today = Get-Date -Format 'yyyy-MM-dd'
 
-if ($content -match "(?m)^## $([regex]::Escape($next))\s*$") {
-    Write-Host "     '## $next' already exists, leaving it alone"
+if ($content -match "(?m)^## \[$([regex]::Escape($next))\]") {
+    Write-Host "     '## [$next]' already exists, leaving it alone"
 } else {
     $from = if ($bundled) { $bundled } else { 'the previous version' }
     $line = "- Updated the bundled ``ai-usagebar`` CLI from $from to $latest."
@@ -200,15 +248,29 @@ if ($content -match "(?m)^## $([regex]::Escape($next))\s*$") {
     }
     $line += "`n  Upstream notes: <https://github.com/$UpstreamRepo/releases/tag/v$latest>"
 
-    $entry = "## $next`n`n### Changed`n$line`n`n"
+    $entry = "## [$next] - $today`n`n### $([char]0xD83D)$([char]0xDD27) Changed`n`n$line`n`n"
 
-    # Insert above the newest existing section, keeping the file's header intact.
-    $idx = $content.IndexOf("`n## ")
-    if ($idx -lt 0) { Fail "could not find a section heading in $changelog" }
+    # Keep a Changelog puts the new section directly below [Unreleased] and above
+    # the previous release. Matching the bracketed heading is what lets the
+    # Unreleased block itself be skipped instead of overwritten.
+    $anchor = [regex]::Match($content, "(?m)^## \[(?!Unreleased\])")
+    if (-not $anchor.Success) { Fail "could not find a released section heading in $changelog" }
 
-    $content = $content.Substring(0, $idx + 1) + $entry + $content.Substring($idx + 1)
+    $content = $content.Substring(0, $anchor.Index) + $entry + $content.Substring($anchor.Index)
+
+    # Footer links: [Unreleased] now compares from the new tag, and the release it
+    # replaced gains a compare line of its own. Without this the new heading would
+    # be an unresolved reference.
+    $unrel = [regex]::Match($content, "(?m)^\[Unreleased\]:\s*(\S+)/compare/v(\S+)\.\.\.HEAD[ 	]*$")
+    if (-not $unrel.Success) { Fail "could not find the [Unreleased] link reference in $changelog" }
+
+    $base = $unrel.Groups[1].Value
+    $prev = $unrel.Groups[2].Value
+    $links = "[Unreleased]: $base/compare/v$next...HEAD`n[$next]: $base/compare/v$prev...v$next"
+    $content = $content.Remove($unrel.Index, $unrel.Length).Insert($unrel.Index, $links)
+
     Set-Content $changelog $content -NoNewline
-    Write-Host "     added '## $next'"
+    Write-Host "     added '## [$next] - $today'"
 }
 
 # -- Publish -----------------------------------------------------------------

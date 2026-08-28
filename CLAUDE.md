@@ -31,7 +31,7 @@ above.
 
 ```
 Poller  ──runs──>  ai-usagebar usage --json  ──stdout──>  UsageJsonRoot
-   │                                                          │
+   │                                                           │
    └── raises Updated(Config, UsageJsonRoot) on the UI thread ─┘
                               │
                           Renderer
@@ -126,10 +126,10 @@ convenience. CI does not use it (it uses `actions/setup-dotnet`).
 Two opt-in environment variables exist only to drive the UI into states that are
 awkward to reach on demand. Neither has any effect unless set.
 
-| Variable | Effect |
-|---|---|
-| `AIUSAGEBAR_WIN_FIXTURE` | Path to a JSON file rendered instead of running the CLI. `scripts/demo-usage.json` holds the five-provider sample used for the README screenshots. |
-| `AIUSAGEBAR_WIN_PIN_POPUP` | Set to `1` to stop the popup hiding on focus loss. Without it the popup cannot be screenshotted, since focusing a terminal dismisses it. |
+| Variable                   | Effect                                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AIUSAGEBAR_WIN_FIXTURE`   | Path to a JSON file rendered instead of running the CLI. `scripts/demo-usage.json` holds the five-provider sample used for the README screenshots. |
+| `AIUSAGEBAR_WIN_PIN_POPUP` | Set to `1` to stop the popup hiding on focus loss. Without it the popup cannot be screenshotted, since focusing a terminal dismisses it.           |
 
 `scripts/capture-screenshots.ps1` captures the popup and settings windows and
 redraws the tray tooltip (the shell owns that one, so it cannot be captured).
@@ -163,7 +163,7 @@ clean machine with no Rust toolchain. The pieces:
   the result to `AiUsageBar/Assets/ai-usagebar.exe`, and **runs the contract
   check against it**. A CLI that no longer matches `Interop.cs` fails the release
   instead of shipping a build that cannot read its own backend.
-- The `.csproj` embeds that file *conditionally* (`Exists(...)`), so local builds
+- The `.csproj` embeds that file _conditionally_ (`Exists(...)`), so local builds
   without it still compile.
 - `CliBinary` extracts it to `%LOCALAPPDATA%\ai-usagebar-win\bin` on first use,
   re-extracting when the app version changes, and returns that path. **The
@@ -198,6 +198,14 @@ what the last GitHub Release bundled (read back from the release notes, the only
 record of it, since nothing pins the version). Add `-Release` to install the new
 CLI, verify the contract against it, write the changelog entry and publish. A
 failed contract check stops it before anything is committed.
+
+`-Release` also **refuses to run while `[Unreleased]` has entries**, and it
+checks that before the Rust build so a refusal never costs five minutes. The
+reason: the release it cuts is described by a single line about the CLI bump, so
+anything pending in `[Unreleased]` would ship inside that version undocumented,
+and a published version does not get rewritten. Close the pending work into its
+own release first, then run the catch-up. The HTML comment in the section is
+ignored, so an untouched `[Unreleased]` counts as empty.
 
 The steps it automates, if you need them by hand:
 
@@ -234,6 +242,29 @@ at 1 whenever the year or month changes.
 `AssemblyVersion` and `FileVersion` derive from it, and `release.yml` reads it
 to name the artifact and tag the release.
 
+### Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
+and is **persistent**: a notable change is written into `[Unreleased]` as it
+lands, never reconstructed at release time.
+
+- Only the six canonical section types, in this order: **Added, Changed,
+  Deprecated, Removed, Fixed, Security**. The emoji prefix is decoration and
+  must stay consistent with the Legend table at the bottom of the file. There is
+  no `Performance` or `Documentation` type, those are `Changed`.
+- Every version heading is `## [<version>] - <YYYY-MM-DD>` and needs a matching
+  comparison link in the footer block. The bracket form is not cosmetic:
+  `release.ps1` greps for `## [$next]` and `sync-upstream.ps1` inserts and
+  matches on it. Reverting to a bare `## <version>` heading breaks both.
+- Validate before reporting a changelog edit as done:
+
+  ```powershell
+  pwsh -File ~/.claude/skills/changelog/scripts/check-changelog.ps1
+  ```
+
+- `0.3.0` predates this repository, so its date is the fork point and its link
+  points at the upstream project's releases page rather than a tag here.
+
 ### Release procedure
 
 Use the script. It exists because every step below has been forgotten at least
@@ -255,8 +286,11 @@ The manual sequence it replaces, for reference:
 its own produces nothing anyone can download: the artifact exists only after the
 tag triggers the workflow. Treat the four steps below as one unit.
 
-1. Bump `<Version>` in `AiUsageBar/AiUsageBar.csproj` to the next CalVer value.
-2. Add the matching section at the top of `CHANGELOG.md`.
+1. Close the changelog: rename `## [Unreleased]` to
+   `## [<version>] - <YYYY-MM-DD>`, open a fresh empty `[Unreleased]` above it,
+   point the `[Unreleased]` footer link at the new tag and add the line for the
+   version just cut.
+2. Bump `<Version>` in `AiUsageBar/AiUsageBar.csproj` to the next CalVer value.
 3. Commit both.
 4. Tag and push, which triggers the `release` workflow:
 
