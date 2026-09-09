@@ -72,12 +72,14 @@ AiUsageBar/
   ci.yml                   restore + build on push to master and on PRs
   release.yml              publish single-file .exe to a GitHub Release
 scripts/
+  README.md                how to run the tooling below, flags and prerequisites
   sync-upstream.ps1        detect a newer ai-usagebar and release the catch-up
   release.ps1              bump, commit, tag and push a release in one step
   check-cli-contract.ps1   verifies the installed CLI still matches Interop.cs
   generate-icon.py         draws Assets/app.ico (sparkle in a severity-banded ring)
   capture-screenshots.ps1  captures the windows, redraws the tray tooltip
   demo-usage.json          five-provider sample for AIUSAGEBAR_WIN_FIXTURE
+  dotnet-install.ps1       stock Microsoft SDK installer, kept for convenience
 ```
 
 ## Build and run
@@ -118,7 +120,7 @@ Local builds do not bundle the CLI, so `CliBinary` falls back to PATH. Without
 it the app still starts and shows a "System Error" card explaining what failed.
 Released builds need none of this: see "Bundled CLI" below.
 
-`dotnet-install.ps1` at the root is the stock Microsoft SDK installer kept for
+`scripts/dotnet-install.ps1` is the stock Microsoft SDK installer kept for
 convenience. CI does not use it (it uses `actions/setup-dotnet`).
 
 ## Development helpers

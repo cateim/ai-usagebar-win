@@ -137,9 +137,18 @@ press F5.
 
 ## Releasing (maintainers only)
 
-Close the changelog (rename `## [Unreleased]` to `## [<version>] - <YYYY-MM-DD>`,
-open a fresh empty `[Unreleased]`, update the footer links), bump `<Version>` in
-`AiUsageBar/AiUsageBar.csproj`, commit both, then:
+Use the scripts, they exist because every step below has been forgotten at least
+once by hand. [`scripts/README.md`](scripts/README.md) documents both in full:
+
+```powershell
+pwsh -File scripts/sync-upstream.ps1                 # is the app behind upstream?
+pwsh -File scripts/release.ps1 -Message "feat: ..."  # bump, tag and push
+```
+
+The manual sequence they replace: close the changelog (rename `## [Unreleased]`
+to `## [<version>] - <YYYY-MM-DD>`, open a fresh empty `[Unreleased]`, update the
+footer links), bump `<Version>` in `AiUsageBar/AiUsageBar.csproj`, commit both,
+then:
 
 ```powershell
 git tag v<version>

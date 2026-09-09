@@ -19,6 +19,8 @@ Releasing renames this heading to `## [X.Y.Z] - YYYY-MM-DD`, opens a fresh empty
 Unreleased above it, and updates the link references at the bottom of the file.
 -->
 
+## [2026.9.1] - 2026-09-09
+
 ### ✨ Added
 
 - `scripts/sync-upstream.ps1`, which detects a newer `ai-usagebar` on crates.io,
@@ -28,11 +30,24 @@ Unreleased above it, and updates the link references at the bottom of the file.
 
 ### 🔧 Changed
 
+- `scripts/README.md` documents the maintainer tooling: when to run
+  `sync-upstream.ps1` versus `release.ps1`, every flag, the prerequisites, and
+  what to do when the contract check fails. The README's release section points
+  at it instead of describing only the manual sequence.
+- `dotnet-install.ps1` moved from the repository root into `scripts/`, where the
+  rest of the tooling lives. `CLAUDE.md` follows it.
 - The build block in the README was repaired. Its Windows paths had been mangled
   by backslash escapes into commands that could not run.
 - The popup and settings screenshots sit side by side, sized so both render at
   the same height, and a second row shows the tray tooltip next to the published
   executable's icon in Explorer.
+
+### 🐛 Fixed
+
+- `sync-upstream.ps1 -Release` could never install anything. It stored the
+  crates.io response in `$crate`, which PowerShell treats as the same variable as
+  the `$Crate` holding the crate name, so `cargo install` was handed the whole
+  JSON object and refused it with "missing crate name before '@'".
 
 ## [2026.8.6] - 2026-08-27
 
@@ -201,7 +216,8 @@ existed. Earlier releases:
 | 🐛 Fixed      | bug fixes                               |
 | 🔐 Security   | vulnerabilities addressed and hardening |
 
-[Unreleased]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.6...HEAD
+[Unreleased]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.1...HEAD
+[2026.9.1]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.6...v2026.9.1
 [2026.8.6]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.5...v2026.8.6
 [2026.8.5]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.4...v2026.8.5
 [2026.8.4]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.3...v2026.8.4

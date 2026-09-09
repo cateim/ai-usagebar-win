@@ -71,11 +71,14 @@ function Step([string]$text) {
 Step "Looking up versions"
 
 # crates.io rejects requests without an identifying User-Agent.
+# The response cannot be called $crate: PowerShell variable names are
+# case-insensitive, so it would overwrite $Crate and hand cargo install the whole
+# JSON object instead of the crate name.
 try {
-    $crate = Invoke-RestMethod -Uri "https://crates.io/api/v1/crates/$Crate" -TimeoutSec 30 -Headers @{
+    $crateApi = Invoke-RestMethod -Uri "https://crates.io/api/v1/crates/$Crate" -TimeoutSec 30 -Headers @{
         'User-Agent' = 'ai-usagebar-win release tooling (github.com/CaTeIM/ai-usagebar-win)'
     }
-    $latest = $crate.crate.max_version
+    $latest = $crateApi.crate.max_version
 } catch {
     Fail "could not reach crates.io: $($_.Exception.Message)"
 }
