@@ -452,6 +452,25 @@ old enough not to send the field.
 line. Putting them in the `.csproj` would force a RID onto every `dotnet build`
 and break it.
 
+**The three flags that decide the download size** are `PublishReadyToRun`,
+`EnableCompressionInSingleFile` and `SatelliteResourceLanguages`, and they only
+make sense together. Measured on the 8.0.30 runtime packs:
+
+| Build                                   |   Size |
+| --------------------------------------- | -----: |
+| plain self-contained single file        | 194 MB |
+| plus ReadyToRun                         | 254 MB |
+| plus compression and English-only       |  88 MB |
+
+ReadyToRun precompiles the startup path and is what keeps the app from JITting
+all of WPF on first launch; compression takes a little of that back at every
+start and hands over 166 MB. The satellite languages are 15.5 MB of WPF error
+strings in 13 languages this app never displays. `PublishTrimmed` is not an
+option (unsupported for WPF), and `InvariantGlobalization` saves nothing on
+Windows, where the runtime uses the OS copy of ICU rather than shipping
+`icudt.dat`. Measure before changing any of them: `dotnet publish ... -o
+"$env:TEMP\aub-test"` and read the size of the produced `.exe`.
+
 **`Config.Save()` writes this app's file, not the CLI's.** It used to write
 `[ui] primary` into the shared config through Tomlyn as well, which was both
 redundant (`CliSettings.Apply` had already written it) and lossy: Tomlyn's model

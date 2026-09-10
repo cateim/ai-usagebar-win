@@ -85,8 +85,23 @@ jobs:
       # ReadyToRun precompiles the startup path (WPF, the WPF-UI dictionaries,
       # BAML parsing, System.Text.Json, Tomlyn) instead of JITting all of it on
       # first launch. It is the single largest lever on time-to-icon for a
-      # self-contained WPF app, at the cost of roughly a third more file size.
-      # Trimming stays off: it is unsupported for WPF and breaks XAML reflection.
+      # self-contained WPF app. Trimming stays off: it is unsupported for WPF and
+      # breaks XAML reflection.
+      #
+      # The other two flags more than pay for it. Measured on 8.0.30:
+      #
+      #   no R2R ......................................... 194 MB
+      #   R2R ............................................ 254 MB
+      #   R2R + compression + English-only resources ...... 88 MB
+      #
+      # Compression costs some decompression at every start, which is what R2R
+      # buys back. Dropping the satellite languages costs nothing anyone will
+      # notice: 15.5 MB of WPF error strings in 13 languages that a tray app
+      # never displays.
+      #
+      # InvariantGlobalization is deliberately absent. It would save nothing:
+      # on Windows the runtime uses the operating system's own ICU, so the
+      # win-x64 runtime pack ships no icudt.dat to remove.
       - name: Publish (win-x64, self-contained, single-file)
         run: >
           dotnet publish AiUsageBar/AiUsageBar.csproj
@@ -97,6 +112,8 @@ jobs:
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:PublishReadyToRun=true
+          -p:EnableCompressionInSingleFile=true
+          -p:SatelliteResourceLanguages=en
           -o publish
 
       - name: Rename .exe with version

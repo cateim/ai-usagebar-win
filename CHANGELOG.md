@@ -19,6 +19,29 @@ Releasing renames this heading to `## [X.Y.Z] - YYYY-MM-DD`, opens a fresh empty
 Unreleased above it, and updates the link references at the bottom of the file.
 -->
 
+## [2026.9.2] - 2026-09-09
+
+### 🔧 Changed
+
+- **The download is 88 MB, less than half of what it has ever been.** Turning on
+  ReadyToRun in 2026.9.1 took it from 194 MB to 254 MB, which was a poor trade
+  for the startup it bought. Compressing the bundle and shipping English-only
+  resources brings it to 88 MB with ReadyToRun still on, so the app both
+  downloads and starts faster than before:
+
+  | Build                                       |   Size |
+  | ------------------------------------------- | -----: |
+  | 2026.8.6 and earlier, no ReadyToRun         | 194 MB |
+  | 2026.9.1, ReadyToRun                        | 254 MB |
+  | 2026.9.2, ReadyToRun + compression + en     |  88 MB |
+
+  Compression costs a little decompression at every start, which is exactly what
+  ReadyToRun gives back. The dropped satellite languages are 15.5 MB of WPF error
+  strings in 13 languages that a tray app never displays. `InvariantGlobalization`
+  was considered and rejected: on Windows the runtime uses the operating system's
+  ICU, so there is no `icudt.dat` in the win-x64 runtime pack to remove and it
+  would have saved nothing.
+
 ## [2026.9.1] - 2026-09-09
 
 An audit release. Five parallel reviews went through the process handling, the
@@ -328,7 +351,8 @@ existed. Earlier releases:
 | 🐛 Fixed      | bug fixes                               |
 | 🔐 Security   | vulnerabilities addressed and hardening |
 
-[Unreleased]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.1...HEAD
+[Unreleased]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.2...HEAD
+[2026.9.2]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.1...v2026.9.2
 [2026.9.1]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.6...v2026.9.1
 [2026.8.6]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.5...v2026.8.6
 [2026.8.5]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.4...v2026.8.5
