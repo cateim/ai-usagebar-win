@@ -81,9 +81,28 @@
             </StackPanel>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="18">
-            <ui:Button Content="Close" Click="OnClose" Margin="0,0,10,0" />
-            <ui:Button Content="Save" Appearance="Primary" Click="OnSave" />
-        </StackPanel>
+        <!-- Footer: versions on the left, actions on the right. The two numbers
+             move independently (no release pins the CLI), so a bug report that
+             names only one of them cannot be reproduced. -->
+        <Grid Grid.Row="2" Margin="18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+                x:Name="VersionLabel"
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                FontSize="11"
+                Opacity="0.6"
+                TextTrimming="CharacterEllipsis"
+                Foreground="{DynamicResource MutedBrush}" />
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <ui:Button Content="Close" Click="OnClose" Margin="0,0,10,0" />
+                <ui:Button x:Name="SaveButton" Content="Save" Appearance="Primary" Click="OnSave" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </ui:FluentWindow>

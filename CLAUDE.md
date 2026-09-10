@@ -41,9 +41,11 @@ Poller  ──runs──>  ai-usagebar usage --json  ──stdout──>  UsageJ
 ```
 
 `Poller` owns all process execution and never throws at the caller: every
-failure path (binary missing, non-zero exit, timeout, invalid JSON) is turned
-into a synthetic entry with id `UsageJsonEntry.SystemId` and status `error`, so
-problems surface in the UI instead of disappearing.
+failure path (binary missing, timeout, unparseable output, an exit code with
+nothing readable behind it) is turned into a synthetic entry with id
+`UsageJsonEntry.SystemId` and status `error`, so problems surface in the UI
+instead of disappearing. A non-zero exit is not by itself such a failure: see
+the gotcha below.
 
 ## Directory structure
 
@@ -60,6 +62,7 @@ AiUsageBar/
     Config.cs              TOML load/save for poll_seconds, this app's own file
     Poller.cs              background polling loop, runs the Rust CLI
     Renderer.cs            JSON to tooltip / popup / settings models
+    VersionInfo.cs         this app's version and the CLI's, for the settings footer
     TrayIconFactory.cs     severity-tinted tray icon drawn in code
     TrayService.cs         H.NotifyIcon wrapper
     StartupService.cs      "Start with Windows" via the HKCU Run key
@@ -94,12 +97,11 @@ Stop-Process -Name ai-usagebar-win -Force -ErrorAction SilentlyContinue
 dotnet restore AiUsageBar.sln
 dotnet build AiUsageBar/AiUsageBar.csproj -c Debug -p:Platform=x64
 
-.\AiUsageBarind\Debug
-et8.0-windows10.0.19041.0i-usagebar-win.exe
+.\AiUsageBar\bin\x64\Debug\net8.0-windows10.0.19041.0\ai-usagebar-win.exe
 ```
 
 `dotnet run` does not work here. It looks for the output under `bin\Debug\`,
-while `Platform` puts it in `bind\Debug\`, so it fails with "cannot find the
+while `Platform` puts it in `bin\x64\Debug\`, so it fails with "cannot find the
 file". Run the produced `.exe` directly instead.
 
 If the app then reports a missing .NET Desktop Runtime, the SDK was installed
@@ -142,6 +144,25 @@ There are none, deliberately. An empty `AiUsageBar.Tests` project was inherited
 from the fork and never contained a single test, so it was removed along with
 its solution entries and the CI `Test` step. If you reintroduce tests, note that
 the app under test is a WPF assembly, so the test project needs `UseWPF`.
+
+## Version reporting
+
+The settings window prints both version numbers in its footer, opposite the
+buttons: `App <CalVer>  ·  CLI <semver>`, with the resolved CLI path in the
+tooltip. `Services/VersionInfo.cs` owns both.
+
+They are shown together because they move independently. No release pins the
+CLI, so two users on the same app version can be running different backends, and
+a bug report naming only one of the two cannot be reproduced. The tooltip
+distinguishes the third variable: whether the CLI came from the bundled copy in
+`%LOCALAPPDATA%` or from `PATH`.
+
+`App` is read from `AssemblyInformationalVersionAttribute`, which carries the
+literal `<Version>` string rather than the four-part number .NET derives for
+`AssemblyVersion`. The CLI's costs a process launch (`ai-usagebar --version`),
+so it is fetched off the UI thread and cached for the life of the process: the
+number cannot change while the app runs, and reopening the window must not spawn
+again. A CLI that cannot be run renders as `unavailable`, never as an exception.
 
 ## Configuration
 
@@ -200,6 +221,13 @@ what the last GitHub Release bundled (read back from the release notes, the only
 record of it, since nothing pins the version). Add `-Release` to install the new
 CLI, verify the contract against it, write the changelog entry and publish. A
 failed contract check stops it before anything is committed.
+
+**Any release is also a CLI catch-up.** Since nothing is pinned, a version cut
+for an unrelated reason compiles the newest CLI and records it in its notes, so
+`-Release` right afterwards would publish a version whose only stated change
+already shipped. Run the script with no flags after publishing anything: when it
+reports the app is up to date, there is nothing left to do. This is not
+hypothetical, 2026.9.2 was cut that way and had to be thrown away unpushed.
 
 `-Release` also **refuses to run while `[Unreleased]` has entries**, and it
 checks that before the Rust build so a refusal never costs five minutes. The
@@ -366,15 +394,70 @@ letting a healthy sibling metric mask it. The reason: `Unknown` sorts below
 severity level, the tray must say "no idea", never "all good" over a maxed-out
 quota.
 
+**A non-zero exit from the CLI does not mean there is no report.** `usage --json`
+exits 1 when *every* vendor errored (`report_exit_code` in the CLI is "all
+entries have an error"), which is exactly a fresh install with nothing signed in,
+and it still prints a complete document naming what is wrong with each vendor.
+`Poller` therefore parses stdout first and judges the exit code second. Reversing
+that order threw the whole diagnosis away and rendered an empty
+`Process exited with code 1:` card, and it also made `Renderer.NeedsSetup`
+unreachable for every real user, since that path needs the per-vendor entries to
+exist. It only ever fired under `AIUSAGEBAR_WIN_FIXTURE`, which is why the
+first-run guidance looked fine in the screenshots for two releases.
+
+**The CLI emits four section types: `metric`, `text`, `block`, `spacer`.** There
+is no `fact`, and there never was. The app dispatched on one for several releases
+while ignoring `text` and `block`, so every row that was not a quota bar was
+dropped: vendors that report no bars at all (Grok, DeepSeek, Kilo) showed a name
+over an empty card. `scripts/demo-usage.json` was written in the same invented
+shape, which is why no screenshot ever revealed it. The contract check now
+validates each type separately *and* runs the same assertions over the fixture,
+so the fixture cannot drift from reality again.
+
+**Never read one pipe to the end before touching the other.** `ReadToEnd()` on
+stdout blocks until the child closes it, and a child that fills the untouched
+stderr buffer (about 4 KB) blocks writing and never exits. Both sides then wait
+forever, and a `WaitForExit(timeout)` placed after the reads cannot save it,
+because it is never reached. This hung the entire UI thread, tray included, with
+no exit but Task Manager. Start both readers, then wait. `Poller` has always done
+this correctly; `CliSettings` had to be repaired.
+
+**Nothing that spawns a process may run on the UI thread.** The tray icon, the
+tooltip, the popup and both windows share one dispatcher, so a synchronous CLI
+call anywhere freezes all of them. `CliSettings.LoadAsync`/`ApplyAsync` and
+`VersionInfo.CliAsync` exist for that reason, and the settings window shows
+itself before it reads anything.
+
+**Distinguish "no file" from "cannot read this file" before writing.** Falling
+back to an empty table for both meant one unreadable moment (a hand-edited typo,
+an antivirus holding the file) replaced the CLI's config, every stored API key
+included, with two lines of `[ui]`. `Config.TryReadTable` returns false only for
+the second case, and the write is skipped. Writes also go through a temp file and
+a rename, so a crash mid-write cannot truncate a file full of credentials.
+
+**Entry ids are not vendor slugs.** A named account is `anthropic@work` and a
+custom provider is `custom:<id>`, while `root.primary` is always the bare vendor.
+Comparing them directly meant a user with named accounts had no primary at all,
+so `ShouldShow` dropped an expired login on the vendor they care about, and the
+tray went grey instead of red. Compare through `Renderer.VendorSlug`.
+
+**The tooltip tag comes from the CLI's `short_name`.** It is unique per vendor
+and the CLI validates uniqueness for custom providers too. The hardcoded table
+that preceded it disagreed with the CLI for most vendors and collapsed every
+custom provider into "cus". The truncation is kept only as a fallback for a CLI
+old enough not to send the field.
+
 **Publish flags live in the workflow, not the `.csproj`.** `SelfContained`,
 `PublishSingleFile` and the RID are passed only on the `dotnet publish` command
 line. Putting them in the `.csproj` would force a RID onto every `dotnet build`
 and break it.
 
-**`Config.Save()` must preserve unknown keys.** The TOML file is shared with the
-Rust CLI, which stores credentials there. Saving through a plain model would
-delete the user's API keys, so saving goes through a `TomlTable` that keeps
-properties the C# model does not know about.
+**`Config.Save()` writes this app's file, not the CLI's.** It used to write
+`[ui] primary` into the shared config through Tomlyn as well, which was both
+redundant (`CliSettings.Apply` had already written it) and lossy: Tomlyn's model
+API has no representation for a comment, so every Save stripped every comment
+from a file the user had been told to hand-edit. The single exception left is
+removing the legacy `poll_seconds`, and only when `Config.Load` actually saw it.
 
 **Provider settings go through the CLI, not through Tomlyn.** `CliSettings`
 wraps `ai-usagebar settings show` (non-secret metadata: `primary`,

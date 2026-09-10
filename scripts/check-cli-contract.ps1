@@ -26,13 +26,27 @@ $ErrorActionPreference = 'Stop'
 $RootFields    = @('entries', 'primary')
 $EntryFields   = @('display_name', 'error', 'fetched_at', 'id', 'metrics',
                    'name', 'plan', 'sections', 'stale', 'status')
+# Known to exist and safe to be absent: 'icon' is never read, and 'short_name'
+# has a fallback in Renderer.Tag for an older CLI.
+$EntryOptional = @('icon', 'short_name')
 $MetricFields  = @('detail', 'label', 'percent', 'reset_at', 'severity', 'value')
-$SectionFields = @('type', 'detail', 'label', 'percent', 'reset_at', 'severity',
-                   'value', 'text')
+# Present only when the vendor states the reset window exactly. Deliberately not
+# consumed: the app shows the CLI's own detail text rather than computing a pace.
+$MetricOptional = @('window_secs')
+# A section is a tagged union, so no single entry carries every field: 'metric'
+# brings percent and severity, 'text' brings value, 'block' brings body, and
+# 'spacer' brings nothing at all. The list is the union of all four, which is why
+# missing fields are checked per type below rather than against this.
+$SectionFields = @('type', 'body', 'detail', 'label', 'percent', 'reset_at',
+                   'severity', 'value', 'window_secs')
 
 # Mirrors SeverityRules.Parse and the section handling in Renderer.cs.
 $KnownSeverities  = @('low', 'mid', 'high', 'critical')
-$KnownSectionType = @('metric', 'fact', 'spacer')
+# The four the CLI actually emits (ReportSection in report.rs). The app used to
+# list a 'fact' type that has never existed upstream while ignoring the real
+# 'text' and 'block', so every non-metric row was silently dropped and this
+# whitelist is what kept the check quiet about it.
+$KnownSectionType = @('metric', 'text', 'block', 'spacer')
 $ExpectedSettingsSchema = 1
 
 $contractErrors  = [System.Collections.Generic.List[string]]::new()
@@ -43,10 +57,19 @@ function Get-Fields($obj) {
     return $obj.PSObject.Properties.Name
 }
 
-function Compare-Shape($obj, [string[]]$expected, [string]$label) {
+function Assert-Section($obj, [string[]]$required, [string]$label) {
     $actual  = Get-Fields $obj
-    $missing = $expected | Where-Object { $_ -notin $actual }
-    $extra   = $actual   | Where-Object { $_ -notin $expected }
+    $missing = $required | Where-Object { $_ -notin $actual }
+    if ($missing) { $script:contractErrors.Add("$label is missing: $($missing -join ', ')") }
+
+    $extra = $actual | Where-Object { $_ -notin $script:SectionFields }
+    if ($extra) { $script:contractNotices.Add("$label has new fields the app ignores: $($extra -join ', ')") }
+}
+
+function Compare-Shape($obj, [string[]]$required, [string]$label, [string[]]$optional = @()) {
+    $actual  = Get-Fields $obj
+    $missing = $required | Where-Object { $_ -notin $actual }
+    $extra   = $actual   | Where-Object { $_ -notin $required -and $_ -notin $optional }
     if ($missing) { $script:contractErrors.Add("$label is missing: $($missing -join ', ')") }
     if ($extra)   { $script:contractNotices.Add("$label has new fields the app ignores: $($extra -join ', ')") }
 }
@@ -86,32 +109,73 @@ if ($usageExit -ne 0) {
     $contractNotices.Add("'ai-usagebar usage --json' exited with $usageExit but returned valid JSON (expected when no vendor is configured).")
 }
 
-Compare-Shape $usage $RootFields 'usage root'
+function Test-Report($report, [string]$source) {
+    Compare-Shape $report $RootFields "$source root"
 
-$entries = @($usage.entries)
-Write-Host "Entries: $($entries.Count)"
+    $entries = @($report.entries)
+    Write-Host "$source entries: $($entries.Count)"
 
-foreach ($entry in $entries) {
-    $id = if ($entry.id) { $entry.id } else { '<no id>' }
-    Compare-Shape $entry $EntryFields "entry '$id'"
+    foreach ($entry in $entries) {
+        $id = if ($entry.id) { $entry.id } else { '<no id>' }
+        Compare-Shape $entry $EntryFields "entry '$id'" $EntryOptional
 
-    foreach ($metric in @($entry.metrics)) {
-        Compare-Shape $metric $MetricFields "entry '$id' metric"
-        if ($metric.severity -and $metric.severity -notin $KnownSeverities) {
-            $contractErrors.Add("entry '$id' has unknown severity '$($metric.severity)'. Renderer.cs will treat it as Unknown (grey).")
-        }
+        foreach ($metric in @($entry.metrics)) {
+            Compare-Shape $metric $MetricFields "entry '$id' metric" $MetricOptional
+            if ($metric.severity -and $metric.severity -notin $KnownSeverities) {
+                $contractErrors.Add("entry '$id' has unknown severity '$($metric.severity)'. Renderer.cs will treat it as Unknown (grey).")
+            }
     }
 
-    foreach ($section in @($entry.sections)) {
-        if ($section.type -notin $KnownSectionType) {
-            $contractNotices.Add("entry '$id' has section type '$($section.type)', which the app does not render.")
-        }
-        # Only metric sections feed the popup bars, so only they need the full shape.
-        if ($section.type -eq 'metric') {
-            $expected = $SectionFields | Where-Object { $_ -ne 'text' }
-            Compare-Shape $section $expected "entry '$id' metric section"
+        foreach ($section in @($entry.sections)) {
+            if ($section.type -notin $KnownSectionType) {
+                $contractNotices.Add("entry '$id' has section type '$($section.type)', which the app does not render.")
+            }
+
+            # Each variant carries its own fields, so each is checked for the ones
+            # the renderer actually reads. Checking only 'metric' was how the app
+            # went several releases reading a section type that did not exist.
+            switch ($section.type) {
+                'metric' { Assert-Section $section @('type', 'label', 'percent', 'severity') "entry '$id' metric section" }
+                'text'   { Assert-Section $section @('type', 'label', 'value')               "entry '$id' text section" }
+                'block'  { Assert-Section $section @('type', 'label', 'body')                "entry '$id' block section" }
+            }
+
+            # A float percent would throw on deserialization into `int Percent` and
+            # turn every poll into a System Error card, so the type is asserted and
+            # not only the field's presence.
+            if ($section.type -eq 'metric' -and $null -ne $section.percent) {
+                if ($section.percent -isnot [int] -and $section.percent -isnot [long]) {
+                    $contractErrors.Add("entry '$id' metric percent is $($section.percent.GetType().Name), not an integer. Interop.cs declares int and will throw.")
+                }
+                }
         }
     }
+}
+
+Test-Report $usage 'usage'
+
+# -- The fixture, checked against the same shape -----------------------------
+
+# An errored entry carries no metrics and no sections, so on a machine with no
+# credentials (the release runner, every time) the loops above check the root and
+# the entries and nothing else. That is most of this script skipped precisely
+# where it is trusted most. The fixture fills the gap: it is a full report with
+# every section type, so the metric and section assertions always run.
+#
+# It also keeps the fixture honest. It was written in a shape the CLI has never
+# emitted, and being the only report the screenshots ever rendered is exactly why
+# nobody noticed.
+
+$fixturePath = Join-Path $PSScriptRoot 'demo-usage.json'
+if (Test-Path $fixturePath) {
+    try {
+        $fixture = Get-Content $fixturePath -Raw | ConvertFrom-Json
+        Test-Report $fixture 'fixture'
+    } catch {
+        $contractErrors.Add("demo-usage.json is not valid JSON: $($_.Exception.Message)")
+    }
+} else {
+    $contractNotices.Add("demo-usage.json not found, fixture shape not checked.")
 }
 
 # -- settings show -----------------------------------------------------------

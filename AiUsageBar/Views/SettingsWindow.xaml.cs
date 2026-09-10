@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -39,9 +40,43 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     public void ShowWith(Config cfg, UsageJsonRoot root)
     {
         _root = root;
-        Populate(cfg);
+
+        // Everything cheap first, then the window, then the CLI. Reading the
+        // provider list costs a process launch, and doing that before Show()
+        // meant the click on Settings produced nothing at all on screen until
+        // the CLI exited, with the tray frozen alongside it because the whole
+        // app shares this thread.
+        PopulateLocal(cfg);
         Show();
         Activate();
+
+        ShowVersions();
+        _ = LoadProvidersAsync();
+    }
+
+    /// <summary>Fills the footer label with both version numbers.
+    ///
+    /// <para>The app's is immediate; the CLI's costs a process launch, so it is
+    /// awaited rather than blocking the window on it, and lands a moment later.
+    /// <see cref="VersionInfo.CliAsync"/> caches, so reopening this window never
+    /// pays that cost twice.</para></summary>
+    private async void ShowVersions()
+    {
+        // async void because this is fire and forget from a UI entry point. The
+        // try/catch is what keeps that safe: an exception escaping here would go
+        // unobserved and take the process down.
+        try
+        {
+            VersionLabel.Text = "App " + VersionInfo.App;
+            VersionLabel.ToolTip = "Running: " + CliBinary.Executable;
+
+            var cli = await VersionInfo.CliAsync();
+            VersionLabel.Text = $"App {VersionInfo.App}  ·  CLI {cli}";
+        }
+        catch (Exception)
+        {
+            VersionLabel.Text = "App " + VersionInfo.App;
+        }
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
@@ -50,7 +85,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         Hide();
     }
 
-    private void Populate(Config cfg)
+    /// <summary>The half of the form that needs nothing but local state.</summary>
+    private void PopulateLocal(Config cfg)
     {
         _model = Renderer.SettingsModel(cfg, _root);
         PollBox.Value = _model.PollSeconds;
@@ -58,14 +94,37 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         SaveErrorLabel.Visibility = Visibility.Collapsed;
         _pendingClears.Clear();
+        _keyBoxes.Clear();
+        KeysPanel.Children.Clear();
+        _snapshot = null;
 
-        // The CLI is the authority on which vendors exist and which of them may
-        // lead the tooltip. Fall back to the usage entries only when it cannot
-        // be reached, so the window still opens on a broken install.
-        _snapshot = CliSettings.Load();
+        KeysUnavailableLabel.Text = "Reading providers from the CLI...";
+        KeysUnavailableLabel.Visibility = Visibility.Visible;
+
+        // Saving before the provider list arrives would write a primary chosen
+        // from an empty combo box.
+        SaveButton.IsEnabled = false;
+    }
+
+    /// <summary>The half that needs the CLI, off the UI thread.
+    ///
+    /// <para>The CLI is the authority on which vendors exist and which of them
+    /// may lead the tooltip. The usage entries are the fallback, so the window
+    /// still works on a broken install.</para></summary>
+    private async Task LoadProvidersAsync()
+    {
+        try
+        {
+            _snapshot = await CliSettings.LoadAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = null;
+        }
 
         PopulatePrimary();
         PopulateKeys();
+        SaveButton.IsEnabled = true;
     }
 
     private void PopulatePrimary()
@@ -95,6 +154,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         var keys = _snapshot?.Keys;
         if (keys is not { Count: > 0 })
         {
+            KeysUnavailableLabel.Text = "The CLI did not report its settings, so keys cannot be edited here.";
             KeysUnavailableLabel.Visibility = Visibility.Visible;
             return;
         }
@@ -220,38 +280,61 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         catch { }
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
+        // async void because this is a click handler. Everything inside is
+        // guarded, so nothing escapes to the dispatcher.
         var cfg = Config.Load();
         cfg.PollSeconds = PollBox.Value is double d ? (long)d : 60;
 
         var primaryId = SelectedPrimaryId();
         if (primaryId != null) cfg.Ui.Primary = primaryId;
 
-        // Vendor keys and the primary go through the CLI, which owns that file and
-        // rewrites it without losing comments. We only write what it knows nothing
-        // about. Bail out before touching anything else if it refuses the patch.
-        var error = CliSettings.Apply(primaryId, CollectKeyChanges());
-        if (error != null)
-        {
-            ShowMessage("Could not save provider settings: " + error);
-            return;
-        }
-
+        // Disabled while the CLI runs: the call is off the UI thread now, so
+        // without this the button stays live and a second click would fire a
+        // competing write of the same file.
+        SaveButton.IsEnabled = false;
         try
         {
-            cfg.Save();
+            // Vendor keys and the primary go through the CLI, which owns that
+            // file and rewrites it without losing comments. We only write what it
+            // knows nothing about. Bail out before touching anything else if it
+            // refuses the patch.
+            string? error;
+            try
+            {
+                error = await CliSettings.ApplyAsync(primaryId, CollectKeyChanges());
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+            }
+
+            if (error != null)
+            {
+                ShowMessage("Could not save provider settings: " + error);
+                return;
+            }
+
+            try
+            {
+                await Task.Run(cfg.Save);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("Could not save app settings: " + ex.Message);
+                return;
+            }
+
+            StartupService.SetEnabled(StartupBox.IsChecked == true);
+
+            Saved?.Invoke();
+            Hide();
         }
-        catch (Exception ex)
+        finally
         {
-            ShowMessage("Could not save app settings: " + ex.Message);
-            return;
+            SaveButton.IsEnabled = true;
         }
-
-        StartupService.SetEnabled(StartupBox.IsChecked == true);
-
-        Saved?.Invoke();
-        Hide();
     }
 
     private string? SelectedPrimaryId()

@@ -49,4 +49,35 @@ public static class StartupService
             // Best-effort: never let a startup-toggle failure take down the app.
         }
     }
+
+    /// <summary>Rewrites the Run entry when the executable has moved.
+    ///
+    /// <para>The path is stamped in when the checkbox is ticked and was never
+    /// revalidated. Someone who runs the download from their Downloads folder,
+    /// ticks "start with Windows" and then files the .exe away somewhere tidy
+    /// gets an entry pointing at a file that no longer exists. Windows fails it
+    /// silently, so the app simply stops starting at logon, and the settings
+    /// checkbox still shows as ticked, giving no hint that anything is wrong.
+    /// The Start Menu shortcut already repairs itself this way on every
+    /// launch.</para></summary>
+    public static void RepairIfMoved()
+    {
+        try
+        {
+            var path = ExePath;
+            if (string.IsNullOrEmpty(path)) return;
+
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (key?.GetValue(ValueName) is not string current) return;
+
+            var expected = $"\"{path}\"";
+            if (string.Equals(current.Trim(), expected, StringComparison.OrdinalIgnoreCase)) return;
+
+            key.SetValue(ValueName, expected);
+        }
+        catch
+        {
+            // Same contract as SetEnabled: never fail a launch over this.
+        }
+    }
 }

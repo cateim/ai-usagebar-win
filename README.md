@@ -52,7 +52,7 @@ API key is handled by that binary.
 
 |                                          Popup - click the tray icon                                           |                                                             Settings                                                              |
 | :------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------: |
-| <img src="screenshots/click.png" alt="Popup with a card per provider, usage bars and reset times" width="270"> | <img src="screenshots/settings.png" alt="Settings window with refresh interval, primary provider and API key fields" width="365"> |
+| <img src="screenshots/click.png" alt="Popup with a card per provider, usage bars and reset times" width="270"> | <img src="screenshots/settings.png" alt="Settings window with refresh interval, primary provider and API key fields" width="367"> |
 
 |                                  Tray tooltip - hover                                   |                                          App icon - the published .exe                                           |
 | :-------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------: |
@@ -70,7 +70,14 @@ API key is handled by that binary.
 - **Quit** (button in the popup) exits the whole process.
 
 The icon color tracks worst-case usage: green <50%, yellow >=50%, orange >=75%,
-red >=90%.
+red >=90%. A grey icon means "no idea": nothing configured yet, or a reading the
+app could not interpret. It is never used for a healthy quota.
+
+The bottom-left of the settings window shows the two versions that matter,
+`App 2026.9.1  ·  CLI 1.14.0`. They move independently, because each release
+bundles whatever CLI was current when it was built, so **quote both in a bug
+report**. Hovering that line shows which `ai-usagebar` executable is actually
+running, the bundled copy or one found on `PATH`.
 
 ## Config
 

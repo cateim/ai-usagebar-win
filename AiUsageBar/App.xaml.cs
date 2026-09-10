@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Windows;
+using System.Windows.Threading;
 using AiUsageBar.Models;
 using AiUsageBar.Services;
 using AiUsageBar.Views;
@@ -54,8 +55,11 @@ public partial class App : Application
         // No window keeps the process alive. Only the tray icon does.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-        // Make the app findable in Windows Search via a Start Menu shortcut.
-        ShortcutService.EnsureStartMenuShortcut();
+        // Last line of defence. A tray app that vanishes leaves the user with no
+        // window, no message and nothing to report: an unhandled exception on the
+        // dispatcher used to do exactly that. Staying alive with a visibly broken
+        // icon is strictly better than disappearing.
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         StartShowPopupListener();
 
@@ -66,6 +70,39 @@ public partial class App : Application
         _poller = new Poller(Dispatcher);
         _poller.Updated += OnUpdated;
         _poller.Start();
+
+        // Housekeeping that nobody is waiting on, moved off the startup path.
+        // The shortcut check instantiates a shell COM object and reads a .lnk,
+        // and the popup costs its BAML parse and visual tree on first use, which
+        // is what made the very first tray click of a session feel slow.
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+        {
+            try
+            {
+                ShortcutService.EnsureStartMenuShortcut();
+                StartupService.RepairIfMoved();
+                _popup ??= CreatePopup();
+            }
+            catch (Exception)
+            {
+                // None of this is worth failing a launch over.
+            }
+        });
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+
+        try
+        {
+            _tray?.Update(Severity.Unknown, "ai-usagebar - internal error\n" + e.Exception.Message);
+        }
+        catch (Exception)
+        {
+            // The tray is the only reporting surface there is. If even that
+            // fails, there is nothing further to try.
+        }
     }
 
     /// <summary>Owns the named event the running instance waits on. A background
@@ -163,8 +200,11 @@ public partial class App : Application
 
     private void Quit()
     {
-        _tray.Dispose();
+        // Poller first. It marshals updates onto the dispatcher, so disposing the
+        // tray icon before stopping it left a poll in flight able to call Update
+        // on an already-disposed icon.
         _poller.Dispose();
+        _tray.Dispose();
         _showEvent?.Dispose();
         _instanceMutex?.ReleaseMutex();
         _instanceMutex?.Dispose();

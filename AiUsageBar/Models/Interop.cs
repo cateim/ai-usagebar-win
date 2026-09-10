@@ -42,6 +42,14 @@ public sealed class UsageJsonEntry
     [JsonPropertyName("sections")]
     public List<UsageJsonSection> Sections { get; set; } = new();
 
+    /// <summary>Three-letter tag the CLI assigns each vendor, unique per vendor
+    /// and validated as unique for custom providers too. The tooltip uses it
+    /// instead of the guessed abbreviation this app used to derive from the id,
+    /// which disagreed with the CLI for most vendors and collided outright for
+    /// custom ones.</summary>
+    [JsonPropertyName("short_name")]
+    public string? ShortName { get; set; }
+
     [JsonPropertyName("stale")]
     public bool Stale { get; set; }
 
@@ -94,7 +102,9 @@ public sealed class UsageJsonSection
     [JsonPropertyName("value")]
     public string? Value { get; set; }
 
-    // For "fact" type:
-    [JsonPropertyName("text")]
-    public string? Text { get; set; }
+    /// <summary>Lines of a "block" section. Vendors that report no quota bars at
+    /// all (Grok, DeepSeek, Kilo) put everything they have here, so dropping it
+    /// left their card showing a name and nothing else.</summary>
+    [JsonPropertyName("body")]
+    public List<string>? Body { get; set; }
 }

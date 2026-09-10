@@ -24,6 +24,12 @@ public sealed class Config
     public long? PollSeconds { get; set; }
     public UiConfig Ui { get; set; } = new();
 
+    /// <summary>True when the CLI's config still carries the legacy
+    /// <c>poll_seconds</c>. That key makes the CLI refuse to parse the file at
+    /// all, so it has to be removed, and removing it is the only reason this app
+    /// ever rewrites that file itself.</summary>
+    private bool _hasLegacyPollKey;
+
     public static Config Load()
     {
         var cfg = new Config();
@@ -39,9 +45,10 @@ public sealed class Config
 
             // Older builds wrote poll_seconds into the CLI's file. Read it so an
             // existing preference survives the move; Save() strips it from there.
-            if (cli.TryGetValue(PollKey, out var legacy) && legacy is long legacySeconds)
+            if (cli.TryGetValue(PollKey, out var legacy))
             {
-                cfg.PollSeconds = legacySeconds;
+                cfg._hasLegacyPollKey = true;
+                if (legacy is long legacySeconds) cfg.PollSeconds = legacySeconds;
             }
         }
 
@@ -60,59 +67,102 @@ public sealed class Config
     public void Save()
     {
         SaveOwnSettings();
-        SaveCliPrimary();
+        RepairLegacyCliConfig();
     }
 
     private void SaveOwnSettings()
     {
         var path = AppConfigPath() ?? throw new InvalidOperationException("could not resolve the app settings directory");
+
+        // Starting from an empty table when this file is unreadable is safe: it
+        // holds poll_seconds and nothing else. The CLI's file, below, is a very
+        // different matter.
         var table = ReadTable(path) ?? new TomlTable();
         table[PollKey] = Math.Max(PollSeconds ?? 60, 15);
         Write(path, table);
     }
 
-    /// <summary>Updates <c>[ui] primary</c> in the CLI's config while preserving
-    /// every other key, since the CLI keeps credentials in the same file. Also
-    /// drops the legacy <c>poll_seconds</c>, repairing a config that the older
-    /// behaviour had made unparseable for the CLI.</summary>
-    private void SaveCliPrimary()
+    /// <summary>Removes the legacy <c>poll_seconds</c> from the CLI's config,
+    /// and nothing else.
+    ///
+    /// <para>Older builds wrote that key there. The CLI denies unknown top-level
+    /// fields, so its presence makes every invocation fail to parse the file and
+    /// the app shows nothing but a System Error. Removing it is the repair.</para>
+    ///
+    /// <para>It runs only when the key is actually present, and this is the only
+    /// code that writes that file. <c>[ui] primary</c> deliberately goes through
+    /// <see cref="CliSettings.Apply"/> instead: the CLI writes with toml_edit and
+    /// keeps comments, while a Tomlyn round trip drops every one of them (the
+    /// model API has no representation for a comment) and would rewrite a file
+    /// full of the user's API keys on every single Save.</para></summary>
+    private void RepairLegacyCliConfig()
     {
-        var path = DefaultPath() ?? throw new InvalidOperationException("could not resolve config directory");
-        var table = ReadTable(path) ?? new TomlTable();
+        if (!_hasLegacyPollKey) return;
 
-        table.Remove(PollKey);
+        var path = DefaultPath();
+        if (path == null) return;
 
-        if (!string.IsNullOrEmpty(Ui.Primary))
-        {
-            if (!table.TryGetValue("ui", out var uiObj) || uiObj is not TomlTable uiTable)
-            {
-                uiTable = new TomlTable();
-                table["ui"] = uiTable;
-            }
-            uiTable["primary"] = Ui.Primary;
-        }
+        // Refuse to write over a file that exists but could not be read. The old
+        // code fell back to an empty table here, so one unreadable moment (a
+        // hand-edited typo, an antivirus holding the file open) replaced the
+        // user's entire config, API keys included, with two lines of [ui].
+        if (!TryReadTable(path, out var table) || table == null) return;
+
+        if (!table.Remove(PollKey)) return;
 
         Write(path, table);
+        _hasLegacyPollKey = false;
     }
 
     private static TomlTable? ReadTable(string? path)
+        => path != null && TryReadTable(path, out var table) ? table : null;
+
+    /// <summary>Distinguishes "no file yet" from "there is a file and I could
+    /// not read it". Both used to come back as null, and conflating them is what
+    /// turned a transient read failure into data loss.</summary>
+    /// <returns>False only when the file exists but could not be read or parsed.
+    /// A missing file returns true with a null table.</returns>
+    private static bool TryReadTable(string path, out TomlTable? table)
     {
-        if (path == null || !File.Exists(path)) return null;
+        table = null;
+        if (!File.Exists(path)) return true;
+
         try
         {
-            return Toml.ToModel(File.ReadAllText(path));
+            table = Toml.ToModel(File.ReadAllText(path));
+            return true;
         }
         catch
         {
-            return null;
+            return false;
         }
     }
 
+    /// <summary>Writes through a temporary file in the same directory.
+    ///
+    /// <para>A plain write truncates first, so losing power or being killed in
+    /// that window leaves the file empty. For the CLI's config that means every
+    /// stored API key is gone, with no backup. The rename is what makes a reader
+    /// see either the old file or the new one, never a half of either.</para></summary>
     private static void Write(string path, TomlTable table)
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(path, Toml.FromModel(table));
+
+        var text = Toml.FromModel(table);
+        var temp = path + ".tmp";
+
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(text);
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
+
+        // File.Move handles both cases; Replace would throw when there is no
+        // original to replace, which is the first save on a clean machine.
+        File.Move(temp, path, overwrite: true);
     }
 
     /// <summary>The Rust CLI's config file. Owned by the CLI; we touch only

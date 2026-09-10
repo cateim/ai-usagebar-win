@@ -93,7 +93,10 @@
                                 <ItemsControl ItemsSource="{Binding Facts}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <TextBlock Text="{Binding Text}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,1,0,1" />
+                                            <!-- Wraps because a "block" section
+                                                 is several lines under one
+                                                 label, not a single value. -->
+                                            <TextBlock Text="{Binding Text}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,1,0,1" TextWrapping="Wrap" />
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>

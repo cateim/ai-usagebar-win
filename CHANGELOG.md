@@ -21,8 +21,23 @@ Unreleased above it, and updates the link references at the bottom of the file.
 
 ## [2026.9.1] - 2026-09-09
 
+An audit release. Five parallel reviews went through the process handling, the
+JSON contract, the WPF layer, the config and secret paths, and startup cost,
+cross-checked against the `ai-usagebar` 1.14.0 source. Most of what follows was
+found there.
+
 ### ✨ Added
 
+- **The settings window shows both version numbers**, opposite the buttons:
+  `App <CalVer>  ·  CLI <semver>`, with the resolved CLI path in the tooltip.
+  The two move independently, since no release pins the CLI, so a bug report
+  naming only one of them cannot be reproduced. The tooltip settles the third
+  variable, whether the CLI came from the bundled copy or from `PATH`. The CLI's
+  version is read off the UI thread and cached for the life of the process.
+- **A last line of defence for the tray.** An unhandled exception on the
+  dispatcher used to end the process, and a tray app that vanishes leaves the
+  user with no window, no message and nothing to report. It now survives, with
+  the icon turned grey and the error in the tooltip.
 - `scripts/sync-upstream.ps1`, which detects a newer `ai-usagebar` on crates.io,
   compares it against the version the last release bundled, verifies the JSON
   contract against that new CLI, and publishes the catch-up release. A failed
@@ -30,20 +45,117 @@ Unreleased above it, and updates the link references at the bottom of the file.
 
 ### 🔧 Changed
 
+- **A failed poll now retries in 5 seconds**, then 10, 20, 40, up to the
+  configured interval, instead of waiting the full minute. The app is usually
+  launched from the Run key, so its first poll races the network stack coming up
+  at logon: the old behaviour showed a wrong tray icon for a minute, every time.
+- **Releases are published ReadyToRun.** The startup path (WPF, the WPF-UI
+  dictionaries, BAML parsing, JSON, TOML) is precompiled rather than JITted on
+  first launch, at the cost of roughly a third more file size. Trimming stays
+  off: it is unsupported for WPF.
+- **The settings window opens before it reads anything.** Both the provider list
+  and Save shell out to the CLI, and both did so synchronously on the UI thread,
+  so clicking Settings produced nothing on screen until the CLI exited, with the
+  tray frozen alongside it. Both are off-thread now, and Save is disabled while
+  it runs so a second click cannot race the first.
+- **The popup follows the taskbar.** It resolves the monitor under the cursor
+  and that monitor's own DPI, and anchors against whichever edge the taskbar is
+  docked to. It also repositions after a refresh, since content that grew while
+  it was open used to slide behind the taskbar.
+- **The tooltip uses the CLI's own three-letter tags.** The hardcoded table
+  disagreed with the CLI for most vendors and gave every custom provider the
+  same "cus".
+- **`Config.Save()` no longer rewrites the CLI's config.** `[ui] primary` was
+  already being written by the CLI itself, and the second write through Tomlyn
+  stripped every comment in the file (the model API has no representation for
+  one). The only thing the app still writes there is the removal of the legacy
+  `poll_seconds`, and only when it is actually present.
+- **The contract check validates each section type separately** and asserts that
+  `percent` is an integer, and it now runs the same assertions over
+  `scripts/demo-usage.json`. On a machine with no credentials, which is the
+  release runner every time, errored entries carry no metrics and no sections,
+  so most of the script was being skipped exactly where it is trusted most.
 - `scripts/README.md` documents the maintainer tooling: when to run
-  `sync-upstream.ps1` versus `release.ps1`, every flag, the prerequisites, and
-  what to do when the contract check fails. The README's release section points
-  at it instead of describing only the manual sequence.
+  `sync-upstream.ps1` versus `release.ps1`, every flag, the prerequisites, what
+  to do when the contract check fails, and the gotchas: the confirmation prompt
+  takes the tag and nothing else, a local tag publishes nothing, and a Rust build
+  failing on a locked file is a retry rather than a bug. `CLAUDE.md` records the
+  one that cost a discarded release: since no release pins the CLI, publishing
+  anything is already a CLI catch-up.
 - `dotnet-install.ps1` moved from the repository root into `scripts/`, where the
   rest of the tooling lives. `CLAUDE.md` follows it.
-- The build block in the README was repaired. Its Windows paths had been mangled
-  by backslash escapes into commands that could not run.
+- The build block in the README was repaired, and so was the same block in
+  `CLAUDE.md`, which still held the mangled version: `\b` and `\a` had been
+  written as a literal backspace and bell, leaving two control characters in the
+  file and a run command nobody could copy. Both now point at `bin\x64\Debug\`,
+  where `-p:Platform=x64` actually puts the executable.
 - The popup and settings screenshots sit side by side, sized so both render at
   the same height, and a second row shows the tray tooltip next to the published
-  executable's icon in Explorer.
+  executable's icon in Explorer. The settings shot was retaken for this release,
+  showing the version footer and the eleven providers the current CLI reports.
 
 ### 🐛 Fixed
 
+- **A fresh install showed an empty error instead of what to do next.** The CLI
+  exits 1 when every vendor failed, which is exactly the machine where nothing is
+  signed in yet, and it still prints a complete report naming the problem with
+  each vendor. The app checked the exit code before parsing, threw all of that
+  away, and showed "Process exited with code 1:" followed by nothing. The
+  first-run guidance written for this case had never once been reachable. Output
+  is parsed first now and the exit code judged second.
+- **Everything that was not a quota bar was invisible.** The app handled section
+  types `metric` and `fact`, and `fact` has never existed in the CLI: the real
+  types are `metric`, `text`, `block` and `spacer`. Vendors that report no bars
+  at all, Grok, DeepSeek and Kilo among them, rendered as a name over an empty
+  card, hiding the prepaid balance that was the only number they had. OpenRouter
+  lost three of its four rows. The fixture behind every screenshot was written in
+  the same phantom shape, which is why it looked right.
+- **Opening or saving settings could hang the entire app, with no way out but
+  Task Manager.** `CliSettings` drained the CLI's stdout to the end before
+  reading a byte of stderr, so anything over the 4 KB pipe buffer on stderr (a
+  TOML parse error with source context, a Rust backtrace) deadlocked the two
+  processes against each other. The 10-second timeout could not fire, because it
+  ran after both reads. Both pipes are drained together now.
+- **A save could silently delete every stored API key.** Writing `[ui] primary`
+  read the CLI's config first and fell back to an empty table when the read
+  failed for any reason, including a hand-edited typo or an antivirus holding the
+  file open for a moment, then wrote that empty table over a file holding the
+  user's credentials. Reading and writing are now told apart: an unreadable file
+  is never written over.
+- **Config writes are atomic.** They truncated the target first, so losing power
+  or being killed mid-write left the CLI's config, API keys and all, empty or
+  half written, with no backup.
+- **Alt+F4 on the popup killed the app.** The window was closed for real while
+  the app kept its reference, so the next tray click called `Show()` on a
+  destroyed window and the process died. It hides instead, like the settings
+  window already did.
+- **One unlucky moment at logon left the bundled CLI unused for the whole
+  session.** A failed extraction, typically the virus scanner holding the file it
+  had just written, was cached as "fall back to PATH", and on a clean machine
+  there is nothing on PATH: every poll failed until the app was restarted, with
+  the correct binary sitting on disk. Failures are no longer cached, the move is
+  retried briefly, the temp file carries the process id so two instances cannot
+  collide, and the version stamp records the size so a truncated binary is
+  detected instead of trusted.
+- **"Start with Windows" broke silently when the executable moved.** The path was
+  stamped in when the box was ticked and never revalidated, so moving the .exe
+  left an entry Windows fails silently, while the checkbox still read as ticked.
+  It is repaired on every launch, the way the Start Menu shortcut already was.
+- **The popup painted an unrecognized severity green.** The tray already refuses
+  to read an unknown level as healthy; the popup, which is where the numbers are
+  actually read, did the opposite. It is grey now, on both surfaces.
+- **A named account hid an outage on the primary vendor.** Entry ids are not bare
+  slugs (`anthropic@work`, `custom:<id>`) while the primary always is, so a user
+  with named accounts had no primary as far as the filter was concerned, and an
+  expired login on the vendor they care about stopped surfacing entirely.
+- **Quitting mid-poll could orphan the CLI process** or push an error into an
+  app that was already tearing down. Cancellation is now told apart from the
+  timeout, the child is killed in both cases, and the poller is disposed before
+  the tray icon it reports to.
+- Error cards no longer render unbounded CLI output verbatim: a captive portal
+  answering with an HTML page turned the popup into a wall of markup.
+- A render that throws degrades to an error card instead of taking the process
+  down, and the three unguarded list accesses that could throw are null-safe.
 - `sync-upstream.ps1 -Release` could never install anything. It stored the
   crates.io response in `$crate`, which PowerShell treats as the same variable as
   the `$Crate` holding the crate name, so `cargo install` was handed the whole

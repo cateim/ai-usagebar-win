@@ -16,19 +16,73 @@ PowerShell 7 (`pwsh`), never by the app and never by CI, with one exception:
 
 ## Which one do I run?
 
-Two different releases, two different entry points. Picking the wrong one is the
-only real trap here.
+One question decides it: **did the app change, or is only the CLI old?**
 
-- **The app itself changed** (UI, services, docs, workflows): close the changelog
-  by hand, then run `release.ps1`.
-- **Only the bundled CLI is behind upstream**: run `sync-upstream.ps1 -Release`.
-  It writes its own changelog entry and calls `release.ps1` for you.
+### The app changed (UI, services, docs, workflows)
 
-They are not interchangeable. `sync-upstream.ps1 -Release` publishes a version
-whose notes say nothing but "bundled CLI updated", so anything you left pending
-in `[Unreleased]` would ship inside that version undocumented. The script refuses
-to run in that case, on purpose, and it checks that **before** the Rust build so
-the refusal costs seconds instead of five minutes.
+```powershell
+# 1. close the changelog by hand, see "Before running it by hand" below
+# 2. publish
+pwsh -File scripts/release.ps1 -Message "feat(ui): what changed"
+# 3. type v<version> at the confirmation prompt, nothing else works
+```
+
+### The CLI is behind upstream
+
+```powershell
+pwsh -File scripts/sync-upstream.ps1            # just look, changes nothing
+pwsh -File scripts/sync-upstream.ps1 -Release   # update, verify and publish
+```
+
+It writes its own changelog entry and calls `release.ps1` for you, so the same
+confirmation prompt shows up at the end.
+
+### Publishing anything also updates the CLI
+
+No release pins the CLI version: the workflow compiles whatever crates.io has
+that day and records it in the release notes. So a release cut for an unrelated
+reason picks up the newest CLI as a side effect, and there is nothing left for a
+catch-up release to do.
+
+**After any release, run `sync-upstream.ps1` with no flags.** When it says the
+app is up to date, you are done. Running `-Release` at that point would publish a
+version whose only stated change already shipped in the one before it.
+
+`-Force` exists for the opposite case, republishing after changing the app, and
+it costs a full Rust rebuild of around twelve minutes. It is almost never what
+you want.
+
+### Why they are not interchangeable
+
+`sync-upstream.ps1 -Release` publishes a version whose notes say nothing but
+"bundled CLI updated", so anything you left pending in `[Unreleased]` would ship
+inside that version undocumented. The script refuses to run in that case, on
+purpose, and it checks that **before** the Rust build so the refusal costs
+seconds instead of five minutes.
+
+## Gotchas
+
+**The confirmation prompt takes the tag and nothing else.** `release.ps1` ends by
+asking you to type `v<version>` back. An empty Enter, a pasted command, a typo:
+all of them abort. That is not a failure, and it is not lost work. The commit and
+the tag are sitting on your machine, and the script prints the two ways forward:
+
+```powershell
+git push origin master && git push origin v<version>   # finish the release
+git tag -d v<version>; git reset --soft HEAD~1         # take it back
+```
+
+Do not re-run `release.ps1` in that state expecting a second chance. It sees the
+tag already exists and stops. Push it or undo it first.
+
+**A local tag publishes nothing.** `git tag` alone is invisible to GitHub. The
+`.exe` is built by the workflow, and the workflow is triggered by the pushed tag.
+`git ls-remote --tags origin` tells you which tags actually exist.
+
+**The Rust build can fail on a locked file.** `error: failed to write ...
+(os error 32)` means something on Windows was holding a file the compiler needed,
+usually a running instance or a scanner, not a problem with the script or with
+upstream. Nothing was committed or published. Run it again.
 
 ## Prerequisites
 
