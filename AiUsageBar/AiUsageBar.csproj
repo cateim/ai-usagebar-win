@@ -21,7 +21,7 @@
          restarting at 1 whenever the year or month changes. This is the single
          source of truth: AssemblyVersion and FileVersion are derived from it,
          and the release tag is this value prefixed with "v". -->
-    <Version>2026.9.2</Version>
+    <Version>2026.9.3</Version>
 
     <!-- Distribution is a single self-contained .exe, but those flags
          (SelfContained / PublishSingleFile / RID) are passed ONLY on the publish
