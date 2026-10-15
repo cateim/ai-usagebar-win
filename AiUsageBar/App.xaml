@@ -24,6 +24,9 @@
             <SolidColorBrush x:Key="AccentBrush" Color="#8A8D93" />
             <SolidColorBrush x:Key="TrackBrush" Color="#2B2D30" />
             <SolidColorBrush x:Key="DangerBrush" Color="#FF8A80" />
+            <!-- Amber, for numbers that are real but not current. Red stays
+                 reserved for things that are actually wrong. -->
+            <SolidColorBrush x:Key="WarningBrush" Color="#FFD180" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

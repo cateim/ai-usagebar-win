@@ -16,11 +16,20 @@ public static class StartupService
     /// this is the bundle .exe (the thing to relaunch), which is what we want.</summary>
     private static string ExePath => Environment.ProcessPath ?? "";
 
-    /// <summary>True if a Run entry for this app exists.</summary>
+    /// <summary>True if a Run entry for this app exists. False when the key
+    /// cannot be read: the settings window calls this while opening, and a
+    /// locked-down registry must not keep it from opening.</summary>
     public static bool IsEnabled()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-        return key?.GetValue(ValueName) is string s && !string.IsNullOrWhiteSpace(s);
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+            return key?.GetValue(ValueName) is string s && !string.IsNullOrWhiteSpace(s);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Add or remove the Run entry. Best-effort: registry access failures

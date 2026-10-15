@@ -91,7 +91,7 @@ public sealed class Config
     ///
     /// <para>It runs only when the key is actually present, and this is the only
     /// code that writes that file. <c>[ui] primary</c> deliberately goes through
-    /// <see cref="CliSettings.Apply"/> instead: the CLI writes with toml_edit and
+    /// <see cref="CliSettings.ApplyAsync"/> instead: the CLI writes with toml_edit and
     /// keeps comments, while a Tomlyn round trip drops every one of them (the
     /// model API has no representation for a comment) and would rewrite a file
     /// full of the user's API keys on every single Save.</para></summary>

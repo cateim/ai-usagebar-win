@@ -1,7 +1,6 @@
 using System;
-using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +12,22 @@ namespace AiUsageBar.Services;
 /// <summary>Background polling loop that executes `ai-usagebar usage --json`.</summary>
 public sealed class Poller : IDisposable
 {
+    /// <summary>How long one run of the CLI may take before it is killed.
+    ///
+    /// <para>It was 10 seconds, shorter than the CLI's own HTTP timeout (30
+    /// seconds per request, vendors fetched one after another). A slow provider
+    /// or an OAuth token refresh therefore got the CLI killed mid-request, which
+    /// both threw the whole report away and risked interrupting a refresh that
+    /// rotates the stored token. This is a hang guard, not a latency budget: the
+    /// poll runs off the UI thread, and the previous report stays on screen
+    /// while it waits.</para></summary>
+    private static readonly TimeSpan CliTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long the last good report keeps standing in for failed
+    /// refreshes. Past this, the failure itself is shown: data that old would
+    /// mislead, and whatever broke is clearly not transient.</summary>
+    private static readonly TimeSpan LastGoodLimit = TimeSpan.FromMinutes(15);
+
     private readonly Dispatcher _ui;
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly CancellationTokenSource _cts = new();
@@ -20,8 +35,16 @@ public sealed class Poller : IDisposable
     /// <summary>The running loop, so Dispose can wait for it.</summary>
     private Task? _loop;
 
+    /// <summary>The newest report the CLI actually produced. Touched only by the
+    /// loop, which runs one iteration at a time.</summary>
+    private UsageJsonRoot? _lastGood;
+
     /// <summary>Raised on the UI thread after each poll completes.</summary>
     public event Action<Config, UsageJsonRoot>? Updated;
+
+    /// <summary>Raised on the UI thread when a poll starts (true) and ends
+    /// (false), so the popup can say "Updating" instead of looking frozen.</summary>
+    public event Action<bool>? BusyChanged;
 
     public Poller(Dispatcher uiThread) => _ui = uiThread;
 
@@ -40,6 +63,7 @@ public sealed class Poller : IDisposable
     {
         try { _wake.Release(); }
         catch (SemaphoreFullException) { /* a refresh is already pending */ }
+        catch (ObjectDisposedException) { /* quitting */ }
     }
 
     private async Task LoopAsync(CancellationToken ct)
@@ -48,15 +72,53 @@ public sealed class Poller : IDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            var cfg = Config.Load();
-            var jsonRoot = await FetchJsonAsync(ct).ConfigureAwait(false);
+            var cfg = new Config();
 
-            if (ct.IsCancellationRequested) break;
-
-            if (jsonRoot != null)
+            // One bad iteration must not end the loop. This runs under Task.Run,
+            // so an exception escaping here would fault the task quietly and
+            // polling would stop for good: a tray frozen on old numbers with
+            // nothing on screen to say why, which is the symptom this whole
+            // class exists to prevent.
+            try
             {
-                consecutiveFailures = IsSystemError(jsonRoot) ? consecutiveFailures + 1 : 0;
-                Publish(cfg, jsonRoot);
+                cfg = Config.Load();
+
+                RaiseBusy(true);
+                var jsonRoot = await FetchJsonAsync(ct).ConfigureAwait(false);
+
+                if (ct.IsCancellationRequested) break;
+
+                if (jsonRoot != null)
+                {
+                    var failed = IsSystemError(jsonRoot);
+                    consecutiveFailures = failed ? consecutiveFailures + 1 : 0;
+
+                    if (failed)
+                    {
+                        // The first line only. What follows it can be CLI output,
+                        // and a TOML parse error quotes the config line it choked
+                        // on, which may be the one holding an API key.
+                        AppLog.WarnOnce("poll failed: " + FirstLine(jsonRoot.Entries[0].Error));
+                        jsonRoot = WithLastGood(jsonRoot);
+                    }
+                    else
+                    {
+                        AppLog.ResetWarnings();
+                        _lastGood = jsonRoot;
+                    }
+
+                    Publish(cfg, jsonRoot);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                consecutiveFailures++;
+                AppLog.Error("poll loop", ex);
+                Publish(cfg, ErrorRoot("Unexpected error while polling:\n" + ex.Message));
+            }
+            finally
+            {
+                RaiseBusy(false);
             }
 
             // A failure retries sooner than the configured interval. The app is
@@ -78,6 +140,39 @@ public sealed class Poller : IDisposable
         }
     }
 
+    /// <summary>Keeps the last good report on screen through a transient
+    /// failure, flagged with why the refresh failed.
+    ///
+    /// <para>A single timed-out poll used to replace every vendor's numbers with
+    /// one "System Error" card and turn the tray grey, for a failure that the
+    /// next poll usually cleared on its own. Numbers a few minutes old, clearly
+    /// marked as such, are more useful than no numbers.</para></summary>
+    private UsageJsonRoot WithLastGood(UsageJsonRoot failure)
+    {
+        var good = _lastGood;
+        if (good?.ReceivedAt is not { } receivedAt) return failure;
+        if (DateTimeOffset.Now - receivedAt > LastGoodLimit) return failure;
+
+        return new UsageJsonRoot
+        {
+            SchemaVersion = good.SchemaVersion,
+            Primary = good.Primary,
+            // A copy: the UI thread may still be reading the list it was handed
+            // with the previous update.
+            Entries = new System.Collections.Generic.List<UsageJsonEntry>(good.Entries ?? new()),
+            ReceivedAt = receivedAt,
+            RefreshError = FirstLine(failure.Entries[0].Error),
+        };
+    }
+
+    private static string? FirstLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var trimmed = text.Trim();
+        var newline = trimmed.IndexOf('\n');
+        return newline < 0 ? trimmed : trimmed[..newline].TrimEnd(':', ' ', '\r');
+    }
+
     /// <summary>Marshals one update, absorbing anything the render throws.
     ///
     /// <para>An exception inside a dispatcher callback is rethrown on the UI
@@ -86,18 +181,42 @@ public sealed class Poller : IDisposable
     /// error card keeps the app alive and says what happened.</para></summary>
     private void Publish(Config cfg, UsageJsonRoot root)
     {
-        _ui.BeginInvoke(() =>
+        try
         {
-            try
+            _ui.BeginInvoke(() =>
             {
-                Updated?.Invoke(cfg, root);
-            }
-            catch (Exception ex)
+                try
+                {
+                    Updated?.Invoke(cfg, root);
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Error("render", ex);
+                    try { Updated?.Invoke(cfg, ErrorRoot("Could not render the CLI output:\n" + ex.Message)); }
+                    catch { }
+                }
+            });
+        }
+        catch (Exception)
+        {
+            // The dispatcher is shutting down: nobody is left to show it to.
+        }
+    }
+
+    private void RaiseBusy(bool busy)
+    {
+        try
+        {
+            _ui.BeginInvoke(() =>
             {
-                try { Updated?.Invoke(cfg, ErrorRoot("Could not render the CLI output:\n" + ex.Message)); }
-                catch { }
-            }
-        });
+                try { BusyChanged?.Invoke(busy); }
+                catch (Exception ex) { AppLog.Error("busy indicator", ex); }
+            });
+        }
+        catch (Exception)
+        {
+            // Same as Publish: shutting down.
+        }
     }
 
     /// <summary>5s, 10s, 20s, 40s, then the configured interval. Never longer
@@ -128,8 +247,10 @@ public sealed class Poller : IDisposable
         {
             try
             {
-                return JsonSerializer.Deserialize<UsageJsonRoot>(File.ReadAllText(fixture))
-                    ?? ErrorRoot(FixtureVariable + " at " + fixture + " parsed to null.");
+                var root = JsonSerializer.Deserialize<UsageJsonRoot>(File.ReadAllText(fixture));
+                if (root == null) return ErrorRoot(FixtureVariable + " at " + fixture + " parsed to null.");
+                root.ReceivedAt = DateTimeOffset.Now;
+                return root;
             }
             catch (Exception ex)
             {
@@ -137,138 +258,80 @@ public sealed class Poller : IDisposable
             }
         }
 
+        CliProcess.Result result;
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = CliBinary.Executable,
-                Arguments = "usage --json",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                // The CLI emits UTF-8. Without this, .NET decodes the pipe using
-                // the console code page (CP1252 here), so a middle dot arrives as
-                // "Â·" and any accented text is mangled.
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Environment = { ["NO_COLOR"] = "1" }
-            };
-
-            using var process = new Process { StartInfo = psi };
-
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-
-            try
-            {
-                process.Start();
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                return ErrorRoot(
-                    $"Could not start the ai-usagebar CLI ({CliBinary.Executable}).\n" +
-                    "Released builds ship it bundled, so this usually means the extracted copy " +
-                    "was removed or blocked. Reinstall the app, or install the CLI yourself with " +
-                    "'cargo install ai-usagebar'.");
-            }
-
-            var outputTask = process.StandardOutput.ReadToEndAsync(linkedCts.Token);
-            var errorTask = process.StandardError.ReadToEndAsync(linkedCts.Token);
-
-            try
-            {
-                await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // Kill on either cause. Leaving the child alive outlives the app
-                // itself when the CLI is blocked on a stalled provider request.
-                try
-                {
-                    if (!process.HasExited) process.Kill(entireProcessTree: true);
-                }
-                catch { }
-
-                // Shutdown, not a timeout: the app is going away, so there is
-                // nobody left to show an error to. Returning null skips the
-                // update instead of marshalling a bogus card onto a dispatcher
-                // that may already be torn down.
-                if (ct.IsCancellationRequested) return null;
-
-                return ErrorRoot("Process timed out after 10 seconds.");
-            }
-
-            var output = await ReadOrEmpty(outputTask).ConfigureAwait(false);
-            var stderr = await ReadOrEmpty(errorTask).ConfigureAwait(false);
-
-            // Parse first, judge the exit code second. The CLI exits 1 when every
-            // vendor failed (report_exit_code: "all entries have an error"), and
-            // that is precisely the fresh install with nothing signed in. It
-            // still prints a complete document naming what is wrong with each
-            // vendor, so treating a non-zero exit as "no data" threw away the
-            // only diagnosis the user had and replaced it with an empty
-            // "Process exited with code 1:" card. It also made the first-run
-            // setup guidance unreachable, since that path needs the per-vendor
-            // entries to exist.
-            if (!string.IsNullOrWhiteSpace(output))
-            {
-                try
-                {
-                    var parsed = JsonSerializer.Deserialize<UsageJsonRoot>(output);
-                    if (parsed != null) return parsed;
-                }
-                catch (JsonException ex)
-                {
-                    // Only report the parse failure when the exit code does not
-                    // already explain it: a crashed CLI writes a diagnostic to
-                    // stderr, which is more useful than a JSON error about it.
-                    if (process.ExitCode == 0)
-                    {
-                        return ErrorRoot($"Failed to parse JSON:\n{ex.Message}\n\nOutput was:\n{Clamp(output)}");
-                    }
-                }
-            }
-
-            if (process.ExitCode != 0)
-            {
-                var detail = stderr.Trim();
-                return ErrorRoot(detail.Length == 0
-                    ? $"Process exited with code {process.ExitCode} without explaining why."
-                    : $"Process exited with code {process.ExitCode}:\n{Clamp(detail)}");
-            }
-
-            return ErrorRoot(string.IsNullOrWhiteSpace(output)
-                ? "Process returned empty output."
-                : "Process returned a JSON null.");
+            result = await CliProcess.RunAsync("usage --json", null, CliTimeout, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Shutdown, not a failure: the app is going away, so there is nobody
+            // left to show an error to. Returning null skips the update instead
+            // of marshalling a bogus card onto a dispatcher that may already be
+            // torn down.
             return null;
+        }
+        catch (TimeoutException)
+        {
+            return ErrorRoot($"The CLI did not answer within {CliTimeout.TotalSeconds:0} seconds.");
+        }
+        catch (Win32Exception)
+        {
+            return ErrorRoot(
+                $"Could not start the ai-usagebar CLI ({CliBinary.Executable}).\n" +
+                "Released builds ship it bundled, so this usually means the extracted copy " +
+                "was removed or blocked. Reinstall the app, or install the CLI yourself with " +
+                "'cargo install ai-usagebar'.");
         }
         catch (Exception ex)
         {
             return ErrorRoot($"Unexpected error:\n{ex.Message}");
         }
-    }
 
-    /// <summary>Awaits a stream reader that may have been abandoned by a kill.
-    ///
-    /// <para>Disposing the process tears the readers' streams out from under
-    /// them, faulting both tasks. Left unobserved those exceptions are collected
-    /// at GC, which is harmless today only because nothing subscribes to
-    /// <c>TaskScheduler.UnobservedTaskException</c>. Observing them here removes
-    /// the trap instead of relying on that.</para></summary>
-    private static async Task<string> ReadOrEmpty(Task<string> reader)
-    {
-        try
+        var output = result.StdOut;
+
+        // Parse first, judge the exit code second. Before 1.20.2 the CLI exited
+        // 1 when every vendor failed, which is precisely the fresh install with
+        // nothing signed in, while still printing a complete document naming
+        // what is wrong with each vendor. Treating a non-zero exit as "no data"
+        // threw away the only diagnosis the user had and replaced it with an
+        // empty "Process exited with code 1:" card. It also made the first-run
+        // setup guidance unreachable, since that path needs the per-vendor
+        // entries to exist.
+        if (!string.IsNullOrWhiteSpace(output))
         {
-            return await reader.ConfigureAwait(false);
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<UsageJsonRoot>(output);
+                if (parsed != null)
+                {
+                    parsed.ReceivedAt = DateTimeOffset.Now;
+                    return parsed;
+                }
+            }
+            catch (JsonException ex)
+            {
+                // Only report the parse failure when the exit code does not
+                // already explain it: a crashed CLI writes a diagnostic to
+                // stderr, which is more useful than a JSON error about it.
+                if (result.ExitCode == 0)
+                {
+                    return ErrorRoot($"Failed to parse JSON:\n{ex.Message}\n\nOutput was:\n{Clamp(output)}");
+                }
+            }
         }
-        catch (Exception)
+
+        if (result.ExitCode != 0)
         {
-            return "";
+            var detail = result.StdErr.Trim();
+            return ErrorRoot(detail.Length == 0
+                ? $"Process exited with code {result.ExitCode} without explaining why."
+                : $"Process exited with code {result.ExitCode}:\n{Clamp(detail)}");
         }
+
+        return ErrorRoot(string.IsNullOrWhiteSpace(output)
+            ? "Process returned empty output."
+            : "Process returned a JSON null.");
     }
 
     /// <summary>Caps text that ends up inside an error card. The popup renders
@@ -305,6 +368,7 @@ public sealed class Poller : IDisposable
         catch (Exception) { /* faulted or timed out: shutting down either way */ }
 
         Updated = null;
+        BusyChanged = null;
         _cts.Dispose();
         _wake.Dispose();
     }

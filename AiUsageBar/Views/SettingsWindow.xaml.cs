@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -68,10 +69,14 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         try
         {
             VersionLabel.Text = "App " + VersionInfo.App;
-            VersionLabel.ToolTip = "Running: " + CliBinary.Executable;
+            VersionLabel.ToolTip = null;
 
+            // The CLI path comes back with the version, resolved off this thread:
+            // reading CliBinary.Executable here could extract the bundled CLI, or
+            // wait on the poller doing it, while the window was opening.
             var cli = await VersionInfo.CliAsync();
-            VersionLabel.Text = $"App {VersionInfo.App}  ·  CLI {cli}";
+            VersionLabel.Text = $"App {VersionInfo.App}  ·  CLI {cli.Version}";
+            VersionLabel.ToolTip = $"Running: {cli.Path}\nLogs: {AppLog.Directory}";
         }
         catch (Exception)
         {
@@ -136,15 +141,32 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         {
             foreach (var choice in choices) PrimaryBox.Items.Add(choice.Label);
 
-            var index = choices.FindIndex(c => c.Id == _model.Primary);
+            // The CLI's own answer first. The local read of config.toml falls
+            // back to "anthropic" when the key is unset, which would preselect a
+            // vendor the user never chose.
+            var current = string.IsNullOrEmpty(_snapshot!.Primary) ? _model.Primary : _snapshot.Primary;
+            var index = choices.FindIndex(c => c.Id == current);
             PrimaryBox.SelectedIndex = index >= 0 ? index : 0;
             return;
         }
 
-        foreach (var entry in _root.Entries) PrimaryBox.Items.Add(entry.DisplayName);
-        var fallback = _root.Entries.FindIndex(e => e.Id == _model.Primary);
+        // Entry ids carry account labels ("anthropic@work"), and the primary is
+        // a vendor, so both sides are compared as vendors.
+        var entries = FallbackEntries();
+        foreach (var entry in entries) PrimaryBox.Items.Add(entry.DisplayName);
+        var fallback = entries.FindIndex(e => Renderer.VendorSlug(e.Id) == Renderer.VendorSlug(_model.Primary));
         PrimaryBox.SelectedIndex = fallback >= 0 ? fallback : 0;
     }
+
+    /// <summary>The usage entries, one per vendor, for when the CLI could not
+    /// list its own choices. Several accounts of one vendor would otherwise
+    /// offer the same choice several times.</summary>
+    private List<UsageJsonEntry> FallbackEntries() =>
+        (_root.Entries ?? new List<UsageJsonEntry>())
+            .Where(e => e.Id != UsageJsonEntry.SystemId)
+            .GroupBy(e => Renderer.VendorSlug(e.Id))
+            .Select(g => g.First())
+            .ToList();
 
     private void PopulateKeys()
     {
@@ -345,7 +367,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         var choices = _snapshot?.PrimaryChoices;
         if (choices is { Count: > 0 }) return index < choices.Count ? choices[index].Id : null;
 
-        return index < _root.Entries.Count ? _root.Entries[index].Id : null;
+        // The CLI accepts a vendor here, never an account id.
+        var entries = FallbackEntries();
+        return index < entries.Count ? Renderer.VendorSlug(entries[index].Id) : null;
     }
 
     /// <summary>A blank box means "leave it alone", so only typed values and

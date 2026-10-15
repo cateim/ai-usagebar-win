@@ -24,21 +24,35 @@ $ErrorActionPreference = 'Stop'
 
 # Mirrors AiUsageBar/Models/Interop.cs. Keep both sides in sync.
 $RootFields    = @('entries', 'primary')
+# 'schema_version' arrived in CLI 1.17 and is read (a value above the one the app
+# supports is shown as a warning). 'overview_vendors' (1.36) is not read: the CLI
+# already orders 'entries' by it, and the app keeps that order.
+$RootOptional  = @('schema_version', 'overview_vendors')
+# The newest usage --json schema Renderer.SupportedSchema understands.
+$SupportedUsageSchema = 1
 $EntryFields   = @('display_name', 'error', 'fetched_at', 'id', 'metrics',
                    'name', 'plan', 'sections', 'stale', 'status')
-# Known to exist and safe to be absent: 'icon' is never read, and 'short_name'
-# has a fallback in Renderer.Tag for an older CLI.
-$EntryOptional = @('icon', 'short_name')
+# Known to exist and safe to be absent: 'icon', 'brand', 'reset_credits' and
+# 'activity' are never read, and 'short_name' has a fallback in Renderer.Tag for
+# an older CLI.
+$EntryOptional = @('icon', 'short_name', 'brand', 'reset_credits', 'activity')
 $MetricFields  = @('detail', 'label', 'percent', 'reset_at', 'severity', 'value')
-# Present only when the vendor states the reset window exactly. Deliberately not
-# consumed: the app shows the CLI's own detail text rather than computing a pace.
-$MetricOptional = @('window_secs')
+# 'window_secs' is present only when the vendor states the reset window exactly,
+# and deliberately not consumed: the app shows the CLI's own detail text rather
+# than computing a pace. 'headline' picks percent or value for the bar header,
+# and 'group' files a row under a heading (Claude Code sessions), which keeps it
+# out of the tray colour. Both are read.
+$MetricOptional = @('window_secs', 'headline', 'group')
+$KnownHeadlines = @('percent', 'value')
 # A section is a tagged union, so no single entry carries every field: 'metric'
 # brings percent and severity, 'text' brings value, 'block' brings body, and
 # 'spacer' brings nothing at all. The list is the union of all four, which is why
-# missing fields are checked per type below rather than against this.
+# missing fields are checked per type below rather than against this. A text row
+# carries 'percent', 'used_cents' and 'limit_cents' only when it meters a prepaid
+# cap; the app reads 'percent' from those and ignores the cents.
 $SectionFields = @('type', 'body', 'detail', 'label', 'percent', 'reset_at',
-                   'severity', 'value', 'window_secs')
+                   'severity', 'value', 'window_secs', 'headline', 'group',
+                   'used_cents', 'limit_cents')
 
 # Mirrors SeverityRules.Parse and the section handling in Renderer.cs.
 $KnownSeverities  = @('low', 'mid', 'high', 'critical')
@@ -110,7 +124,13 @@ if ($usageExit -ne 0) {
 }
 
 function Test-Report($report, [string]$source) {
-    Compare-Shape $report $RootFields "$source root"
+    Compare-Shape $report $RootFields "$source root" $RootOptional
+
+    # Upstream raises the schema only for a change older readers cannot handle,
+    # so a newer one means the app is reading a shape it was not written for.
+    if ($null -ne $report.schema_version -and $report.schema_version -gt $SupportedUsageSchema) {
+        $contractErrors.Add("$source schema_version is $($report.schema_version); the app reads $SupportedUsageSchema. Review the upstream changelog before releasing.")
+    }
 
     $entries = @($report.entries)
     Write-Host "$source entries: $($entries.Count)"
@@ -124,7 +144,10 @@ function Test-Report($report, [string]$source) {
             if ($metric.severity -and $metric.severity -notin $KnownSeverities) {
                 $contractErrors.Add("entry '$id' has unknown severity '$($metric.severity)'. Renderer.cs will treat it as Unknown (grey).")
             }
-    }
+            if ($metric.headline -and $metric.headline -notin $KnownHeadlines) {
+                $contractNotices.Add("entry '$id' metric has headline '$($metric.headline)'; the app shows the percentage for it.")
+            }
+        }
 
         foreach ($section in @($entry.sections)) {
             if ($section.type -notin $KnownSectionType) {
@@ -142,12 +165,12 @@ function Test-Report($report, [string]$source) {
 
             # A float percent would throw on deserialization into `int Percent` and
             # turn every poll into a System Error card, so the type is asserted and
-            # not only the field's presence.
-            if ($section.type -eq 'metric' -and $null -ne $section.percent) {
+            # not only the field's presence. Text rows can carry one too.
+            if ($section.type -in @('metric', 'text') -and $null -ne $section.percent) {
                 if ($section.percent -isnot [int] -and $section.percent -isnot [long]) {
-                    $contractErrors.Add("entry '$id' metric percent is $($section.percent.GetType().Name), not an integer. Interop.cs declares int and will throw.")
+                    $contractErrors.Add("entry '$id' $($section.type) percent is $($section.percent.GetType().Name), not an integer. Interop.cs declares int and will throw.")
                 }
-                }
+            }
         }
     }
 }

@@ -19,6 +19,112 @@ Releasing renames this heading to `## [X.Y.Z] - YYYY-MM-DD`, opens a fresh empty
 Unreleased above it, and updates the link references at the bottom of the file.
 -->
 
+A robustness release, driven by two reports: the tray "freezing", and the plan
+name sometimes going missing. Both traced to concrete causes, listed below, and
+the app was brought up to date with `ai-usagebar` 1.38.0 along the way.
+
+### ✨ Added
+
+- **The popup says how fresh its numbers are.** The footer reads `Updated 14:32`,
+  or `Updating…` while a poll runs, so a click on Refresh visibly does something
+  and numbers from an hour ago no longer look like numbers from a second ago.
+- **A local log for the failures nobody sees happen.** Unhandled exceptions
+  (dispatcher, thread pool, unobserved tasks) and failed polls are written to
+  `%LOCALAPPDATA%\ai-usagebar-win\logs\app.log`, capped at 256 KB with one
+  rotated copy. The settings window's version tooltip names the folder. The crash
+  that prompted this left only a Windows Error Reporting entry with no stack
+  trace.
+- **Claude Code sessions and other grouped rows get their own section.** Rows the
+  CLI files under a heading (`group`: each live Claude Code session's context
+  window since 1.25.0, SuperGrok's breakdown) are drawn as compact bars under that
+  heading, below the quota windows, instead of as their peers.
+- **Bars honour the CLI's `headline`.** A metric whose headline is its value (a
+  prepaid balance) shows `$37.42 of $100.00` instead of a bare `37%`, and a text
+  row that meters a prepaid cap (Cursor's On-Demand) is drawn as a bar.
+
+### 🔧 Changed
+
+- **A failed refresh no longer wipes the numbers.** One timed-out poll used to
+  replace every vendor with a single System Error card and turn the tray grey,
+  for a failure the next poll usually cleared. The last good report now stays on
+  screen for up to 15 minutes under an amber notice saying why the refresh failed
+  and how old the data is, and the tooltip opens with `Not refreshed since
+  14:32`. Past 15 minutes the error itself is shown.
+- **The CLI gets 60 seconds instead of 10.** Its own HTTP timeout is 30 seconds
+  per request, with vendors fetched one after another, so a slow provider or an
+  OAuth token refresh got it killed mid-request: the whole report was lost and a
+  token rotation could be interrupted. This is a hang guard only, the poll never
+  blocks the UI.
+- **Every CLI launch goes through one runner** (`Services/CliProcess.cs`). The
+  poller, the settings window and the version label each had a copy, and they had
+  drifted: the version check still read stdout to the end before stderr, the
+  pattern that once deadlocked the UI thread. The settings window also no longer
+  resolves (and possibly extracts) the CLI on the UI thread while opening.
+- **Entries keep the order the CLI sends**, with the primary vendor first. The
+  CLI orders them as arranged in `[ui] overview_vendors`, and sorting the rest by
+  id threw that away.
+- **A tray click acts immediately.** The left click waited the system
+  double-click time (half a second by default) to tell a click from a double
+  click, and nothing is bound to a double click.
+- **A popup taller than the screen scrolls** inside itself instead of being
+  clamped off the top of the monitor.
+- **Validated against `ai-usagebar` 1.38.0** (the last release notes name 1.15.0).
+  `scripts/check-cli-contract.ps1` knows the fields added since (`schema_version`,
+  `headline`, `group`, `brand`, `reset_credits`, `activity`, `overview_vendors`,
+  the cents on text rows) and fails on a `schema_version` newer than the app
+  reads, which the popup also reports. `scripts/demo-usage.json` exercises `group`
+  and `headline`.
+
+### 🐛 Fixed
+
+- **The popup walked sideways on every Refresh.** Repositioning after a refresh
+  (added in 2026.9.1 so a growing popup would not slide behind the taskbar)
+  re-read the cursor, and a click on Refresh leaves the cursor on that button,
+  not on the tray icon. Each click therefore re-centred the popup on the button
+  and moved it a button's width further left (140 pixels per click, measured on
+  a 125% display), or onto another monitor if the mouse had wandered there. The
+  position is now taken once, when the popup opens, and a refresh only adjusts
+  the height against the taskbar.
+- **The freezes: the whole app ran at idle priority.** H.NotifyIcon's
+  `ForceCreate()` switches the process into Efficiency Mode by default, which is
+  the idle priority class (plus EcoQoS on Windows 11), and Windows hands the idle
+  class down to child processes, so the CLI ran at idle priority too. Under any
+  real CPU load the popup opened late and the CLI blew through its timeout. The
+  icon is now created with Efficiency Mode off.
+- **A crash on tray click.** H.NotifyIcon runs the right-click command inside its
+  native window procedure, and the left-click command inside a synchronous
+  `Dispatcher.Invoke` made from a timer thread. An exception in either place
+  never reached the app's last-resort handler and ended the process, which
+  matches the Windows Error Reporting crash of 2026-09-22 (an unhandled CLR
+  exception after four days of uptime, with no .NET stack trace logged). Clicks
+  are now queued onto the dispatcher, where that handler applies.
+- **The plan name disappeared whenever a fetch failed.** The CLI still names the
+  plan on an errored entry (it reads it from the stored login), and the error card
+  dropped it. The card header also put the name and the plan in one shared grid
+  cell, so a long account name and a long plan printed over each other. They now
+  sit in two columns that trim, with the full text in a tooltip.
+- **A Claude Code session painted the tray red.** Since CLI 1.25.0 `metrics` also
+  lists each live session's context window, and a session at 90% of its context
+  counted as a quota at 90% while every real quota sat at 29%. Grouped rows now
+  count only when an entry has nothing else, the partition upstream applies in
+  its own tray.
+- **The tray icon could be missing for the whole session.** At logon the app can
+  start before Explorer's notification area exists, and the failure to create the
+  icon aborted startup before the poller started: a process with no icon and no
+  data. A failed re-add after an Explorer restart was never retried either. The
+  icon now retries every 5 seconds until the shell accepts it, and is re-added
+  whenever an update is refused.
+- **Every account of the primary vendor surfaces again.** Since CLI 1.21.0
+  `primary` is an entry id (`anthropic@work`) rather than a vendor. Both sides are
+  now reduced to the vendor before comparing, so an expired login on any of that
+  vendor's accounts still shows.
+- **A quarantined CLI copy failed every poll until a restart.** The resolved CLI
+  path was cached for the life of the process, so once an antivirus removed the
+  extracted copy, every poll failed the same way. A failed launch now forgets the
+  path and extracts again.
+- An absent metric severity is painted grey in the popup, matching the tray,
+  instead of green.
+
 ## [2026.9.3] - 2026-09-11
 
 ### 🔧 Changed

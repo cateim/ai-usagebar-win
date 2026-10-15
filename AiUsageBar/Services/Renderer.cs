@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using AiUsageBar.Models;
 
@@ -12,12 +13,23 @@ public static class Renderer
     /// reported, which draws an empty ring rather than a misleading full one.</summary>
     public sealed record Rendered(Severity Severity, string Tooltip, int? Percent);
 
+    /// <summary>The newest <c>usage --json</c> schema this build was written
+    /// against. Upstream bumps it only for a shape older readers cannot handle.</summary>
+    public const int SupportedSchema = 1;
+
     public static Rendered Render(UsageJsonRoot root, Config cfg, DateTimeOffset now)
     {
         var severities = new List<Severity>();
         var tipLines = new List<string>();
 
         var primaryId = PrimaryId(root, cfg);
+
+        // First, because the tooltip is clamped from the end: numbers that did
+        // not refresh must never read as current, and this line is what says so.
+        if (root.RefreshError != null && root.ReceivedAt is { } receivedAt)
+        {
+            tipLines.Add("Not refreshed since " + Clock(receivedAt, now));
+        }
 
         foreach (var entry in Ordered(Entries(root), primaryId))
         {
@@ -33,8 +45,11 @@ public static class Renderer
                 continue;
             }
 
-            // Find the most critical metric
-            var worstMetric = Metrics(entry).OrderByDescending(m => SeverityRules.Parse(m.Severity ?? "")).FirstOrDefault();
+            // The most critical quota window, and among equals the fullest one.
+            var worstMetric = QuotaMetrics(entry)
+                .OrderByDescending(m => SeverityRules.Parse(m.Severity ?? ""))
+                .ThenByDescending(m => m.Percent)
+                .FirstOrDefault();
             if (worstMetric != null)
             {
                 tipLines.Add($"{tag} {worstMetric.Value} · {worstMetric.Label}");
@@ -75,10 +90,12 @@ public static class Renderer
         return new Rendered(worstSeverity, tooltip, WorstPercent(root, primaryId));
     }
 
-    private static IEnumerable<UsageJsonEntry> Ordered(List<UsageJsonEntry>? entries, string? primaryId)
-        => (entries ?? new List<UsageJsonEntry>())
-            .OrderBy(r => !IsPrimary(r, primaryId))
-            .ThenBy(r => r.Id);
+    /// <summary>The primary vendor first, everything else in the order the CLI
+    /// sent it. The CLI orders entries the way the user arranged them
+    /// (<c>[ui] overview_vendors</c>), and OrderBy is stable, so that order
+    /// survives. Sorting the rest by id used to throw it away.</summary>
+    private static IEnumerable<UsageJsonEntry> Ordered(List<UsageJsonEntry> entries, string primaryId)
+        => entries.OrderBy(r => !IsPrimary(r, primaryId));
 
     /// <summary>Null-safe metric list. The CLI omits the field on an errored
     /// entry and could start sending an explicit null at any upstream release,
@@ -86,6 +103,22 @@ public static class Renderer
     /// Every access goes through here so one such change cannot crash a render.</summary>
     private static List<UsageJsonMetric> Metrics(UsageJsonEntry entry)
         => entry.Metrics ?? new List<UsageJsonMetric>();
+
+    /// <summary>The metrics that speak for the entry's quota.
+    ///
+    /// <para><c>metrics</c> also carries rows filed under a heading: the context
+    /// window of each live Claude Code session ("Sessions"), SuperGrok's product
+    /// slices ("Breakdown"). A session at 90% of its context window is not a
+    /// quota at 90%, yet counting it painted the tray red while every real quota
+    /// sat at 29%. Upstream hit the same bug in its own tray and settled on this
+    /// partition: the standalone rows decide, and grouped rows stand in only when
+    /// an entry has nothing else.</para></summary>
+    private static List<UsageJsonMetric> QuotaMetrics(UsageJsonEntry entry)
+    {
+        var all = Metrics(entry);
+        var standalone = all.Where(m => string.IsNullOrWhiteSpace(m.Group)).ToList();
+        return standalone.Count > 0 ? standalone : all;
+    }
 
     private static List<UsageJsonSection> Sections(UsageJsonEntry entry)
         => entry.Sections ?? new List<UsageJsonSection>();
@@ -106,19 +139,23 @@ public static class Renderer
     }
 
     /// <summary>The vendor part of an entry id. Ids are not bare slugs: a named
-    /// account is "anthropic@work" and a custom provider is "custom:&lt;id&gt;", while
-    /// the primary the CLI reports is always the bare vendor. Comparing the two
-    /// directly meant a user with named accounts had no primary at all, so an
-    /// expired login on the vendor they care about stopped surfacing.</summary>
-    private static string VendorSlug(string id)
+    /// account is "anthropic@work" and a custom provider is "custom:&lt;id&gt;".
+    /// The primary is an entry id since CLI 1.21 and a bare slug before it (and
+    /// in the local config), so both sides are reduced to the vendor before
+    /// comparing. Comparing raw ids meant a user with named accounts had no
+    /// primary at all, so an expired login on the vendor they care about
+    /// stopped surfacing.</summary>
+    public static string VendorSlug(string id)
     {
         var at = id.IndexOf('@');
         return at > 0 ? id[..at] : id;
     }
 
-    private static bool IsPrimary(UsageJsonEntry entry, string? primaryId)
+    /// <summary>Every account of the primary vendor counts as primary, not only
+    /// the first one the CLI names, so a failed login on any of them surfaces.</summary>
+    private static bool IsPrimary(UsageJsonEntry entry, string primaryId)
         => !string.IsNullOrEmpty(primaryId)
-        && (entry.Id == primaryId || VendorSlug(entry.Id) == primaryId);
+        && VendorSlug(entry.Id) == VendorSlug(primaryId);
 
     /// <summary>The vendor the UI revolves around: what the CLI reported, or the
     /// local config when the CLI could not say (a synthetic error root).</summary>
@@ -135,14 +172,15 @@ public static class Renderer
         || IsPrimary(entry, primaryId)
         || entry.Id == UsageJsonEntry.SystemId;
 
-    /// <summary>Highest percentage among the metrics actually on show, which is
-    /// the same number the worst severity came from. Null when there is nothing
-    /// to measure, so the tray ring stays empty instead of implying zero usage.</summary>
+    /// <summary>Highest percentage among the quota windows actually on show,
+    /// which is the same number the worst severity came from. Null when there is
+    /// nothing to measure, so the tray ring stays empty instead of implying zero
+    /// usage.</summary>
     private static int? WorstPercent(UsageJsonRoot root, string primaryId)
     {
         var percentages = Entries(root)
             .Where(e => ShouldShow(e, primaryId) && e.Status == "ready")
-            .SelectMany(Metrics)
+            .SelectMany(QuotaMetrics)
             .Select(m => m.Percent)
             .ToList();
 
@@ -158,7 +196,7 @@ public static class Renderer
     {
         if (entry.Status != "ready") return Severity.Critical;
 
-        var metrics = Metrics(entry);
+        var metrics = QuotaMetrics(entry);
         if (metrics.Count == 0) return Severity.Low;
 
         var severities = metrics.Select(m => SeverityRules.Parse(m.Severity ?? "")).ToList();
@@ -169,10 +207,23 @@ public static class Renderer
         return severities.Max();
     }
 
+    /// <summary>A time short enough for a tooltip: the clock alone today, the
+    /// date as well otherwise, since "since 14:32" three days later lies.</summary>
+    private static string Clock(DateTimeOffset at, DateTimeOffset now)
+    {
+        var local = at.ToLocalTime();
+        return local.Date == now.ToLocalTime().Date
+            ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
+            : local.ToString("MMM d, HH:mm", CultureInfo.InvariantCulture);
+    }
+
     // -- Popup ---------------------------------------------------------------
 
     public static PopupModel PopupModel(UsageJsonRoot root, Config cfg, DateTimeOffset now)
     {
+        var notice = Notice(root, now);
+        var updated = root.ReceivedAt is { } at ? "Updated " + Clock(at, now) : null;
+
         // Nothing readable and no synthetic system entry means the CLI ran fine
         // but has no account to report on, which is what a fresh install looks
         // like. Raw credential errors are useless to someone who has simply not
@@ -190,10 +241,12 @@ public static class Renderer
                 SetupDetail = string.Join("\n", Entries(root)
                     .Where(e => !string.IsNullOrWhiteSpace(e.Error))
                     .Select(e => $"{e.DisplayName}: {e.Error!.Trim()}")),
+                Notice = notice,
+                UpdatedText = updated,
             };
         }
 
-        var model = new PopupModel();
+        var model = new PopupModel { Notice = notice, UpdatedText = updated };
         var primaryId = PrimaryId(root, cfg);
 
         foreach (var entry in Ordered(Entries(root), primaryId))
@@ -202,7 +255,7 @@ public static class Renderer
 
             if (entry.Status == "ready")
             {
-                model.Vendors.Add(OkCard(entry));
+                model.Vendors.Add(OkCard(entry, now));
             }
             else
             {
@@ -210,6 +263,10 @@ public static class Renderer
                 {
                     Id = entry.Id,
                     Name = entry.DisplayName,
+                    // The CLI names the plan even on a failed fetch (it reads it
+                    // from the stored login), and dropping it here is why a card
+                    // sometimes lost its plan name the moment a request failed.
+                    Plan = entry.Plan,
                     Status = "error",
                     Message = entry.Error ?? entry.Status,
                 });
@@ -218,9 +275,30 @@ public static class Renderer
         return model;
     }
 
-    private static VendorCard OkCard(UsageJsonEntry entry)
+    /// <summary>What the popup must say above the numbers, or null.</summary>
+    private static string? Notice(UsageJsonRoot root, DateTimeOffset now)
+    {
+        var lines = new List<string>();
+
+        if (!string.IsNullOrEmpty(root.RefreshError))
+        {
+            var since = root.ReceivedAt is { } at ? $" Showing data from {Clock(at, now)}." : "";
+            lines.Add($"Could not refresh: {root.RefreshError}{since}");
+        }
+
+        if (root.SchemaVersion is { } schema && schema > SupportedSchema)
+        {
+            lines.Add($"The CLI reports schema {schema}, newer than the {SupportedSchema} this app reads. "
+                + "Some values may be missing until the app is updated.");
+        }
+
+        return lines.Count == 0 ? null : string.Join("\n", lines);
+    }
+
+    private static VendorCard OkCard(UsageJsonEntry entry, DateTimeOffset now)
     {
         var bars = new List<Bar>();
+        var groups = new List<BarGroup>();
         var facts = new List<Fact>();
 
         // The CLI emits exactly four section types: metric, text, block and
@@ -235,19 +313,34 @@ public static class Renderer
             switch (section.Type)
             {
                 case "metric":
-                    bars.Add(new Bar
+                    var bar = MetricBar(section);
+                    if (string.IsNullOrWhiteSpace(section.Group))
                     {
-                        Label = section.Label ?? "",
-                        Pct = section.Percent ?? 0,
-                        Level = section.Severity ?? "low",
-                        // The UI binds Reset as the bar's secondary line, which
-                        // is where the CLI's detail text belongs.
-                        Reset = section.Detail
-                    });
+                        bars.Add(bar);
+                    }
+                    else
+                    {
+                        GroupFor(groups, section.Group!).Bars.Add(bar);
+                    }
                     break;
 
                 case "text":
-                    if (!string.IsNullOrWhiteSpace(section.Value))
+                    if (string.IsNullOrWhiteSpace(section.Value)) break;
+
+                    // A text row that carries a percentage meters a prepaid cap
+                    // (Cursor's On-Demand spend). That is a gauge, so it is drawn
+                    // as one, with the amount as its headline.
+                    if (section.Percent is { } spent)
+                    {
+                        bars.Add(new Bar
+                        {
+                            Label = string.IsNullOrWhiteSpace(section.Label) ? "Spend" : section.Label!,
+                            Pct = spent,
+                            Level = LevelName(SeverityRules.ForPct(spent)),
+                            ValueText = section.Value!,
+                        });
+                    }
+                    else
                     {
                         facts.Add(new Fact
                         {
@@ -280,7 +373,12 @@ public static class Renderer
 
         // Add a general message if the entry has an error but status is ready (e.g. stale warning)
         string? message = null;
-        if (entry.Stale) message = "Data is stale (offline).";
+        if (entry.Stale)
+        {
+            message = entry.FetchedAt is { } fetched
+                ? $"Showing data from {Clock(fetched, now)}: the provider could not be reached."
+                : "Data is stale (offline).";
+        }
         if (!string.IsNullOrEmpty(entry.Error)) message = entry.Error;
 
         return new VendorCard
@@ -291,9 +389,51 @@ public static class Renderer
             Status = "ok",
             Message = message,
             Bars = bars,
+            Groups = groups,
             Facts = facts,
         };
     }
+
+    private static Bar MetricBar(UsageJsonSection section)
+    {
+        var pct = section.Percent ?? 0;
+        return new Bar
+        {
+            Label = section.Label ?? "",
+            Pct = pct,
+            // An absent severity is painted grey, not green, for the same reason
+            // an unknown one is: the popup must never call a quota healthy on a
+            // guess.
+            Level = section.Severity ?? "",
+            // The UI binds Reset as the bar's secondary line, which is where
+            // the CLI's detail text belongs.
+            Reset = section.Detail,
+            ValueText = section.Headline == "value" && !string.IsNullOrWhiteSpace(section.Value)
+                ? section.Value!
+                : $"{pct}%",
+        };
+    }
+
+    /// <summary>The group of that title, created on first use, so groups keep
+    /// the order the CLI listed them in.</summary>
+    private static BarGroup GroupFor(List<BarGroup> groups, string title)
+    {
+        var group = groups.FirstOrDefault(g => g.Title == title);
+        if (group != null) return group;
+
+        group = new BarGroup { Title = title };
+        groups.Add(group);
+        return group;
+    }
+
+    private static string LevelName(Severity severity) => severity switch
+    {
+        Severity.Critical => "critical",
+        Severity.High => "high",
+        Severity.Mid => "mid",
+        Severity.Low => "low",
+        _ => "",
+    };
 
     // -- Settings ------------------------------------------------------------
 

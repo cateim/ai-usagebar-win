@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using AiUsageBar.Models;
@@ -38,6 +39,9 @@ public partial class App : Application
     private Config _cfg = new();
     private UsageJsonRoot _root = new();
 
+    /// <summary>Whether a poll is running right now.</summary>
+    private bool _busy;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -61,14 +65,22 @@ public partial class App : Application
         // icon is strictly better than disappearing.
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
+        // These two cannot keep the process alive, but they can leave a stack
+        // trace behind. The crash that prompted them left only a WER entry.
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
         StartShowPopupListener();
 
-        _tray = new TrayService();
+        // Never throws, even when the shell is not ready for the icon yet, so
+        // the poller below always starts.
+        _tray = new TrayService(Dispatcher);
         _tray.Clicked += OnTrayClicked;
         _tray.Init();
 
         _poller = new Poller(Dispatcher);
         _poller.Updated += OnUpdated;
+        _poller.BusyChanged += OnBusyChanged;
         _poller.Start();
 
         // Housekeeping that nobody is waiting on, moved off the startup path.
@@ -93,6 +105,7 @@ public partial class App : Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;
+        AppLog.Error("dispatcher", e.Exception);
 
         try
         {
@@ -103,6 +116,20 @@ public partial class App : Application
             // The tray is the only reporting surface there is. If even that
             // fails, there is nothing further to try.
         }
+    }
+
+    private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception ex)
+        {
+            AppLog.Error(e.IsTerminating ? "unhandled, process terminating" : "unhandled", ex);
+        }
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        AppLog.Error("unobserved task", e.Exception);
+        e.SetObserved();
     }
 
     /// <summary>Owns the named event the running instance waits on. A background
@@ -151,7 +178,15 @@ public partial class App : Application
     private void ShowPopupFromExternal()
     {
         _popup ??= CreatePopup();
+        _popup.SetBusy(_busy);
         _popup.EnsureShown(_cfg, _root);
+    }
+
+    /// <summary>Runs on the UI thread when a poll starts or ends.</summary>
+    private void OnBusyChanged(bool busy)
+    {
+        _busy = busy;
+        _popup?.SetBusy(busy);
     }
 
     /// <summary>Runs on the UI thread after each poll.</summary>
@@ -172,6 +207,7 @@ public partial class App : Application
     private void OnTrayClicked()
     {
         _popup ??= CreatePopup();
+        _popup.SetBusy(_busy);
         _popup.Toggle(_cfg, _root);
     }
 
@@ -206,7 +242,12 @@ public partial class App : Application
         _poller.Dispose();
         _tray.Dispose();
         _showEvent?.Dispose();
-        _instanceMutex?.ReleaseMutex();
+
+        // Only the thread that created the mutex owns it. Quit always runs on
+        // that thread today, but a release that throws here would skip the
+        // Shutdown below and leave a process with no icon behind.
+        try { _instanceMutex?.ReleaseMutex(); }
+        catch (ApplicationException) { }
         _instanceMutex?.Dispose();
         Shutdown();
     }

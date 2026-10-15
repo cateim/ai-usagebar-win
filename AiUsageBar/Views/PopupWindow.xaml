@@ -10,113 +10,217 @@
     Topmost="True"
     SizeToContent="WidthAndHeight">
 
+    <Window.Resources>
+        <!-- A quota window: label and value over a full-height bar, with the
+             CLI's detail line underneath. -->
+        <DataTemplate x:Key="BarTemplate">
+            <StackPanel Margin="0,2,0,2">
+                <Grid Margin="0,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding ValueText}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="8,0,0,0" />
+                </Grid>
+                <ProgressBar
+                    Minimum="0"
+                    Maximum="100"
+                    Value="{Binding Pct, Mode=OneWay}"
+                    Height="8"
+                    Background="{StaticResource TrackBrush}"
+                    Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+
+                <TextBlock
+                    Text="{Binding Reset}"
+                    Visibility="{Binding HasDetail, Converter={StaticResource BoolToVisibility}}"
+                    Foreground="{StaticResource MutedBrush}"
+                    FontSize="11"
+                    TextWrapping="Wrap"
+                    Margin="0,3,0,0" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- A row under a group heading (a Claude Code session, a product
+             slice): same data, drawn small so it never competes with the quota
+             windows above it. -->
+        <DataTemplate x:Key="CompactBarTemplate">
+            <StackPanel Margin="0,1,0,3">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding Reset}" />
+                    <TextBlock Grid.Column="1" Text="{Binding ValueText}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="8,0,0,0" />
+                </Grid>
+                <ProgressBar
+                    Minimum="0"
+                    Maximum="100"
+                    Value="{Binding Pct, Mode=OneWay}"
+                    Height="3"
+                    Margin="0,2,0,0"
+                    Background="{StaticResource TrackBrush}"
+                    Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+            </StackPanel>
+        </DataTemplate>
+    </Window.Resources>
+
     <Border Width="360" Padding="14" Background="{StaticResource BgBrush}" CornerRadius="8">
         <Grid x:Name="RootGrid">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <!-- Star, not Auto: with the window's MaxHeight set to the work
+                     area, this is the row that gives way and scrolls when there
+                     are more cards than the screen holds, instead of the popup
+                     running off the top of the monitor. -->
+                <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- First-run / nothing-configured state. Replaces the vendor cards,
-                 because raw credential errors are not actionable on a fresh
-                 install. The CLI's own text stays below, smaller, for diagnosis. -->
-            <StackPanel x:Name="SetupPanel" Grid.Row="0" Visibility="Collapsed">
-                <TextBlock
-                    x:Name="SetupHintLabel"
-                    Foreground="{StaticResource MutedBrush}"
-                    TextWrapping="Wrap"
-                    LineHeight="18" />
+            <!-- A refresh that failed behind the numbers on show, or a report
+                 newer than this build reads. Amber: the numbers are real, only
+                 not current. -->
+            <Border
+                x:Name="NoticePanel"
+                Grid.Row="0"
+                Background="{StaticResource CardBrush}"
+                BorderBrush="{StaticResource WarningBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="10,8"
+                Margin="0,0,0,8"
+                Visibility="Collapsed">
+                <TextBlock x:Name="NoticeLabel" Foreground="{StaticResource WarningBrush}" FontSize="12" TextWrapping="Wrap" />
+            </Border>
 
-                <TextBlock
-                    x:Name="SetupDetailLabel"
-                    Foreground="{StaticResource MutedBrush}"
-                    Opacity="0.6"
-                    FontSize="10"
-                    TextWrapping="Wrap"
-                    Margin="0,10,0,0" />
-            </StackPanel>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid>
+                    <!-- First-run / nothing-configured state. Replaces the vendor cards,
+                         because raw credential errors are not actionable on a fresh
+                         install. The CLI's own text stays below, smaller, for diagnosis. -->
+                    <StackPanel x:Name="SetupPanel" Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="SetupHintLabel"
+                            Foreground="{StaticResource MutedBrush}"
+                            TextWrapping="Wrap"
+                            LineHeight="18" />
 
-            <!-- Vendor cards -->
-            <ItemsControl x:Name="VendorsList" Grid.Row="0">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Border Background="{StaticResource CardBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,8">
-                            <StackPanel>
-                                <Grid Margin="0,0,0,6">
-                                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
-                                    <TextBlock
-                                        Text="{Binding Plan}"
-                                        Foreground="{StaticResource MutedBrush}"
-                                        FontSize="12"
-                                        HorizontalAlignment="Right"
-                                        Visibility="{Binding HasPlan, Converter={StaticResource BoolToVisibility}}" />
-                                </Grid>
+                        <TextBlock
+                            x:Name="SetupDetailLabel"
+                            Foreground="{StaticResource MutedBrush}"
+                            Opacity="0.6"
+                            FontSize="10"
+                            TextWrapping="Wrap"
+                            Margin="0,10,0,0" />
+                    </StackPanel>
 
-                                <TextBlock
-                                    Text="{Binding Message}"
-                                    Foreground="{StaticResource DangerBrush}"
-                                    TextWrapping="Wrap"
-                                    FontSize="12"
-                                    Margin="0,0,0,6"
-                                    Visibility="{Binding HasMessage, Converter={StaticResource BoolToVisibility}}" />
+                    <!-- Vendor cards -->
+                    <ItemsControl x:Name="VendorsList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource CardBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <!-- Two columns, so a long account name and a
+                                             long plan trim instead of printing over
+                                             each other in one shared cell. -->
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                Text="{Binding Name}"
+                                                ToolTip="{Binding Name}"
+                                                Foreground="{StaticResource TextBrush}"
+                                                FontWeight="SemiBold"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                Text="{Binding Plan}"
+                                                ToolTip="{Binding Plan}"
+                                                Foreground="{StaticResource MutedBrush}"
+                                                FontSize="12"
+                                                MaxWidth="170"
+                                                Margin="10,0,0,0"
+                                                VerticalAlignment="Center"
+                                                TextTrimming="CharacterEllipsis"
+                                                Visibility="{Binding HasPlan, Converter={StaticResource BoolToVisibility}}" />
+                                        </Grid>
 
-                                <!-- Progress bars -->
-                                <ItemsControl ItemsSource="{Binding Bars}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Margin="0,2,0,2">
-                                                <Grid Margin="0,0,0,2">
-                                                    <TextBlock Text="{Binding Label}" Foreground="{StaticResource MutedBrush}" FontSize="12" />
-                                                    <TextBlock Text="{Binding ValueText}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Right" />
-                                                </Grid>
-                                                <ProgressBar
-                                                    Minimum="0"
-                                                    Maximum="100"
-                                                    Value="{Binding Pct}"
-                                                    Height="8"
-                                                    Background="{StaticResource TrackBrush}"
-                                                    Foreground="{Binding Level, Converter={StaticResource LevelToBrush}}" />
+                                        <TextBlock
+                                            Text="{Binding Message}"
+                                            Foreground="{StaticResource DangerBrush}"
+                                            TextWrapping="Wrap"
+                                            FontSize="12"
+                                            Margin="0,0,0,6"
+                                            Visibility="{Binding HasMessage, Converter={StaticResource BoolToVisibility}}" />
 
-                                                <TextBlock
-                                                    Text="{Binding Reset}"
-                                                    Visibility="{Binding HasDetail, Converter={StaticResource BoolToVisibility}}"
-                                                    Foreground="{StaticResource MutedBrush}"
-                                                    FontSize="11"
-                                                    TextWrapping="Wrap"
-                                                    Margin="0,3,0,0" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                        <!-- Quota windows -->
+                                        <ItemsControl ItemsSource="{Binding Bars}" ItemTemplate="{StaticResource BarTemplate}" />
 
-                                <!-- Facts -->
-                                <ItemsControl ItemsSource="{Binding Facts}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <!-- Wraps because a "block" section
-                                                 is several lines under one
-                                                 label, not a single value. -->
-                                            <TextBlock Text="{Binding Text}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,1,0,1" TextWrapping="Wrap" />
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                                        <!-- Rows filed under a heading -->
+                                        <ItemsControl ItemsSource="{Binding Groups}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,6,0,0">
+                                                        <TextBlock
+                                                            Text="{Binding Title}"
+                                                            Foreground="{StaticResource TextBrush}"
+                                                            Opacity="0.8"
+                                                            FontSize="11"
+                                                            FontWeight="SemiBold"
+                                                            Margin="0,0,0,2" />
+                                                        <ItemsControl ItemsSource="{Binding Bars}" ItemTemplate="{StaticResource CompactBarTemplate}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- Facts -->
+                                        <ItemsControl ItemsSource="{Binding Facts}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <!-- Wraps because a "block" section
+                                                         is several lines under one
+                                                         label, not a single value. -->
+                                                    <TextBlock Text="{Binding Text}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,1,0,1" TextWrapping="Wrap" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </ScrollViewer>
 
             <!-- Footer -->
-            <Grid Grid.Row="1" Margin="0,4,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Button Grid.Column="0" Content="Refresh" Margin="0,0,3,0" HorizontalAlignment="Stretch" Click="OnRefresh" />
-                <Button Grid.Column="1" Content="Settings" Margin="3,0,3,0" HorizontalAlignment="Stretch" Click="OnSettings" />
-                <Button Grid.Column="2" Content="Quit" Margin="3,0,0,0" HorizontalAlignment="Stretch" Click="OnQuit" />
-            </Grid>
+            <StackPanel Grid.Row="2" Margin="0,4,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="Refresh" Margin="0,0,3,0" HorizontalAlignment="Stretch" Click="OnRefresh" />
+                    <Button Grid.Column="1" Content="Settings" Margin="3,0,3,0" HorizontalAlignment="Stretch" Click="OnSettings" />
+                    <Button Grid.Column="2" Content="Quit" Margin="3,0,0,0" HorizontalAlignment="Stretch" Click="OnQuit" />
+                </Grid>
+
+                <!-- "Updated 14:32" or "Updating...": without it, numbers from an
+                     hour ago and numbers from a second ago look the same, and a
+                     click on Refresh looked like it did nothing. -->
+                <TextBlock
+                    x:Name="StatusLabel"
+                    Foreground="{StaticResource MutedBrush}"
+                    Opacity="0.7"
+                    FontSize="10"
+                    HorizontalAlignment="Center"
+                    Margin="0,6,0,0" />
+            </StackPanel>
         </Grid>
     </Border>
 </Window>

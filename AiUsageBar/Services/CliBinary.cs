@@ -81,6 +81,17 @@ public static class CliBinary
         }
     }
 
+    /// <summary>Forgets the resolved path after it failed to start.
+    ///
+    /// <para>A successful resolution was cached for the life of the process, so
+    /// once the extracted copy disappeared (an antivirus quarantine, someone
+    /// cleaning <c>%LOCALAPPDATA%</c>) every poll failed with the same System
+    /// Error until the app was restarted. The next call now extracts again.</para></summary>
+    public static void Invalidate()
+    {
+        lock (Gate) _resolved = null;
+    }
+
     /// <summary>Returns the extracted path, or null when no CLI is bundled.</summary>
     private static string? EnsureExtracted()
     {

@@ -62,7 +62,10 @@ API key is handled by that binary.
 
 - **Hover** the tray icon for a one-line-per-provider tooltip.
 - **Click** the tray icon for a popup with a card and progress bars per
-  provider.
+  provider. Claude Code sessions, when the CLI reports them, sit in their own
+  compact section under the quota bars. The footer says when the numbers were
+  last updated, and if a refresh fails the last good numbers stay on screen under
+  an amber notice that says how old they are.
 - **Settings** (button in the popup) opens a window to set the refresh
   interval, choose the primary provider, toggle **Start with Windows**, and
   enter the **API key** for any provider that uses one. Providers that sign in
@@ -73,11 +76,13 @@ The icon color tracks worst-case usage: green <50%, yellow >=50%, orange >=75%,
 red >=90%. A grey icon means "no idea": nothing configured yet, or a reading the
 app could not interpret. It is never used for a healthy quota.
 
-The bottom-left of the settings window shows the two versions that matter,
-`App 2026.9.1  ·  CLI 1.14.0`. They move independently, because each release
-bundles whatever CLI was current when it was built, so **quote both in a bug
-report**. Hovering that line shows which `ai-usagebar` executable is actually
-running, the bundled copy or one found on `PATH`.
+The bottom-left of the settings window shows the two versions that matter, for
+example `App 2026.9.3  ·  CLI 1.38.0`. They move independently, because each
+release bundles whatever CLI was current when it was built, so **quote both in a
+bug report**. Hovering that line shows which `ai-usagebar` executable is
+actually running (the bundled copy or one found on `PATH`) and the folder of the
+app's log, `%LOCALAPPDATA%\ai-usagebar-win\logs`. Attach `app.log` from there to
+a report about a freeze or a crash.
 
 ## Config
 
@@ -190,9 +195,14 @@ reopens the popup. **Quit** (in the popup) closes it.
 | ----------------------------- | -------------------------------------------------------------- |
 | `Models/Interop.cs`           | JSON deserialization model for `ai-usagebar usage --json`      |
 | `Models/ViewModels.cs`        | popup + settings view-models bound by XAML                     |
-| `Services/Config.cs`          | TOML config load/save (poll interval, UI primary)              |
-| `Services/Poller.cs`          | background polling loop - executes the Rust CLI                |
+| `Services/AppLog.cs`          | local log for crashes and failed polls, size-capped            |
+| `Services/CliBinary.cs`       | resolves the bundled CLI, extracting it on first use           |
+| `Services/CliProcess.cs`      | the one process runner every CLI launch goes through           |
+| `Services/CliSettings.cs`     | `settings show` / `settings apply` (primary, API keys)         |
+| `Services/Config.cs`          | TOML load/save for `poll_seconds`, this app's own file         |
+| `Services/Poller.cs`          | background polling loop, keeps the last good report            |
 | `Services/Renderer.cs`        | JSON results -> tooltip + popup/settings view-models           |
+| `Services/VersionInfo.cs`     | app and CLI versions for the settings footer                   |
 | `Services/TrayIconFactory.cs` | severity-tinted tray icon drawn in code                        |
 | `Services/TrayService.cs`     | H.NotifyIcon wrapper                                           |
 | `Services/StartupService.cs`  | "Start with Windows" via the HKCU Run key                      |

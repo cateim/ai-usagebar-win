@@ -40,12 +40,17 @@ Poller  ──runs──>  ai-usagebar usage --json  ──stdout──>  UsageJ
                               └─> SettingsModel                ─> SettingsWindow
 ```
 
-`Poller` owns all process execution and never throws at the caller: every
-failure path (binary missing, timeout, unparseable output, an exit code with
-nothing readable behind it) is turned into a synthetic entry with id
-`UsageJsonEntry.SystemId` and status `error`, so problems surface in the UI
-instead of disappearing. A non-zero exit is not by itself such a failure: see
-the gotcha below.
+`Poller` never throws at the caller: every failure path (binary missing,
+timeout, unparseable output, an exit code with nothing readable behind it) is
+turned into a synthetic entry with id `UsageJsonEntry.SystemId` and status
+`error`, so problems surface in the UI instead of disappearing. A non-zero exit
+is not by itself such a failure: see the gotcha below. When a poll fails and the
+last good report is under 15 minutes old, that report is published instead,
+with `RefreshError` set, and the popup shows it under an amber notice.
+
+Every launch of the CLI, from the poller, the settings window and the version
+label alike, goes through `CliProcess.RunAsync`, which always runs on the thread
+pool, drains both pipes together and kills the whole tree on timeout.
 
 ## Directory structure
 
@@ -57,10 +62,12 @@ AiUsageBar/
     Interop.cs             JSON contract for `ai-usagebar usage --json`
     ViewModels.cs          popup and settings view-models bound by XAML
   Services/
+    AppLog.cs              local log for crashes and failed polls, size-capped
     CliBinary.cs           resolves the bundled CLI, extracting it on first use
+    CliProcess.cs          the one process runner every CLI launch goes through
     CliSettings.cs         `settings show` / `settings apply` (primary, API keys)
     Config.cs              TOML load/save for poll_seconds, this app's own file
-    Poller.cs              background polling loop, runs the Rust CLI
+    Poller.cs              background polling loop, keeps the last good report
     Renderer.cs            JSON to tooltip / popup / settings models
     VersionInfo.cs         this app's version and the CLI's, for the settings footer
     TrayIconFactory.cs     severity-tinted tray icon drawn in code
@@ -137,6 +144,14 @@ awkward to reach on demand. Neither has any effect unless set.
 
 `scripts/capture-screenshots.ps1` captures the popup and settings windows and
 redraws the tray tooltip (the shell owns that one, so it cannot be captured).
+Launching the `.exe` a second time while one instance runs opens the running
+instance's popup, which is how to show it without clicking the tray.
+
+Failures nobody is watching (unhandled exceptions on any thread, failed polls,
+a tray icon the shell refused) go to
+`%LOCALAPPDATA%\ai-usagebar-win\logs\app.log`, capped at 256 KB with one rotated
+copy. Read it first when a user reports a freeze or a crash. The settings
+window's version tooltip shows the folder.
 
 ## Tests
 
@@ -160,9 +175,11 @@ distinguishes the third variable: whether the CLI came from the bundled copy in
 `App` is read from `AssemblyInformationalVersionAttribute`, which carries the
 literal `<Version>` string rather than the four-part number .NET derives for
 `AssemblyVersion`. The CLI's costs a process launch (`ai-usagebar --version`),
-so it is fetched off the UI thread and cached for the life of the process: the
-number cannot change while the app runs, and reopening the window must not spawn
-again. A CLI that cannot be run renders as `unavailable`, never as an exception.
+so it is fetched off the UI thread, together with the resolved path, and a
+successful read is cached for the life of the process: the number cannot change
+while the app runs, and reopening the window must not spawn again. A CLI that
+cannot be run renders as `unavailable`, never as an exception, and that result
+is not cached. The tooltip also names the log folder.
 
 ## Configuration
 
@@ -202,13 +219,25 @@ record which CLI version each build shipped.
 
 ## Tracking the upstream CLI
 
-Validated against **`ai-usagebar` 1.4.0**, with 1.7.0 current on crates.io at the
-time of writing. Upstream moves fast (ten releases in three weeks around 1.0.0),
-so treat schema drift as expected rather than exceptional. Note the contract
-check covers `usage --json` only: `CliSettings` also depends on the shape of
-`settings show` and on `settings apply` accepting `schema_version`, `primary` and
-`keys`, where each key entry is `{action: "set"|"clear", value}`. Re-check those
-by opening the settings window after an upstream jump.
+Validated against **`ai-usagebar` 1.38.0** (2026-10-15). Upstream moves fast
+(twenty-seven releases after 1.15.0, in five weeks), so treat
+schema drift as expected rather than exceptional. Note the contract check covers
+`usage --json` only: `CliSettings` also depends on the shape of `settings show`
+and on `settings apply` accepting `schema_version`, `primary` and `keys`, where
+each key entry is `{action: "set"|"clear", value}`. Re-check those by opening
+the settings window after an upstream jump.
+
+Contract changes since 1.15.0 that the app consumes:
+
+| Since  | Change                                                                 | Where the app handles it            |
+| ------ | ---------------------------------------------------------------------- | ----------------------------------- |
+| 1.17.0 | top-level `schema_version: 1`, raised only for incompatible shapes     | `Renderer.Notice`, contract check   |
+| 1.19.0 | metrics carry `group` (`"Breakdown"`, later `"Sessions"`)              | `Renderer.QuotaMetrics`, popup      |
+| 1.20.2 | `usage` exits 0 whenever it printed a complete document                | `Poller` already parses first       |
+| 1.21.0 | `primary` is an entry id (`anthropic@work`), not a vendor slug         | `Renderer.IsPrimary` via `VendorSlug` |
+| 1.22.0 | metrics carry `headline: "percent"\|"value"`                           | `Renderer.MetricBar`                |
+| 1.25.0 | Claude Code sessions listed as grouped rows in `metrics` (opt-in)      | `Renderer.QuotaMetrics`             |
+| 1.36.0 | `entries` follow `[ui] overview_vendors`, also echoed at the top level | `Renderer.Ordered` keeps CLI order  |
 
 Check whether the published app is behind upstream:
 
@@ -256,12 +285,14 @@ Failure modes ranked by how they show up:
 - **Silent**: a field is renamed. `System.Text.Json` ignores unknown fields and
   defaults missing ones, so the vendor renders as `ready` with no bars. This is
   what the contract script exists to catch.
-- **Cosmetic**: a new vendor id appears. The tooltip tag falls back to the first
-  three letters of the id. `Renderer.cs` has short tags for 7 of the 16 vendors
-  the CLI supports; extending that list is optional polish.
+- **Cosmetic**: a new vendor id appears. Nothing to do: the tooltip tag comes
+  from the CLI's own `short_name`, and the first three letters of the id are
+  only a fallback for a CLI too old to send one.
 
-`usage --json` carries no `schema_version` (only `settings show` does), so there
-is no version field to branch on. The script is the substitute.
+`usage --json` carries `schema_version` since 1.17.0, and upstream raises it only
+for a shape older readers cannot handle. A value above `Renderer.SupportedSchema`
+is shown as a warning in the popup and fails the contract check. Fields that are
+renamed without a bump still slip through, so the script stays the real guard.
 
 ## Versioning and release
 
@@ -419,14 +450,69 @@ stdout blocks until the child closes it, and a child that fills the untouched
 stderr buffer (about 4 KB) blocks writing and never exits. Both sides then wait
 forever, and a `WaitForExit(timeout)` placed after the reads cannot save it,
 because it is never reached. This hung the entire UI thread, tray included, with
-no exit but Task Manager. Start both readers, then wait. `Poller` has always done
-this correctly; `CliSettings` had to be repaired.
+no exit but Task Manager. Start both readers, then wait. That logic now lives in
+`CliProcess` alone, because three hand-written copies of it had drifted apart
+(the version check was still reading the pipes one after the other). Never
+start the CLI anywhere else.
 
 **Nothing that spawns a process may run on the UI thread.** The tray icon, the
 tooltip, the popup and both windows share one dispatcher, so a synchronous CLI
-call anywhere freezes all of them. `CliSettings.LoadAsync`/`ApplyAsync` and
-`VersionInfo.CliAsync` exist for that reason, and the settings window shows
-itself before it reads anything.
+call anywhere freezes all of them. `CliProcess.RunAsync` always hops to the
+thread pool, and that includes resolving `CliBinary.Executable`, which can
+extract the bundled CLI. The settings window shows itself before it reads
+anything.
+
+**The CLI timeout must outlast the CLI's own.** `Poller.CliTimeout` is 60 s. The
+CLI's HTTP client times out at 30 s per request and fetches vendors one after
+another, so the old 10 s killed it mid-request during any slow provider or OAuth
+token refresh, losing the whole report and possibly interrupting a token
+rotation. The poll is off the UI thread and the previous report stays on screen,
+so a long timeout costs nothing visible.
+
+**H.NotifyIcon's defaults are wrong for this app, three times over.**
+
+- `ForceCreate()` with no argument switches the whole process into Efficiency
+  Mode: idle priority class, plus EcoQoS on Windows 11. Windows hands the idle
+  class down to child processes, so the CLI ran at idle priority as well, and
+  under CPU load the popup opened late and the CLI blew its timeout. That was
+  the "freezing". Always `ForceCreate(enablesEfficiencyMode: false)`.
+- The right-click command runs inside the native window procedure of
+  H.NotifyIcon's message window, and the left-click command inside a synchronous
+  `Dispatcher.Invoke(Action)` made from a `System.Threading.Timer` thread. An
+  exception in either place bypasses `DispatcherUnhandledException` and kills
+  the process. `TrayService` therefore only queues the work with
+  `BeginInvoke`. Never do real work in a tray callback.
+- Assigning `TaskbarIcon.Icon` disposes the previous `Icon`. The cache in
+  `TrayIconFactory` survives that only because `Icon.FromHandle` does not own
+  its handle, so that dispose is a no-op. Never build the cached icons with a
+  constructor that owns the handle.
+
+Creating the icon can also fail outright at logon, before Explorer's
+notification area exists. `TrayService.Init` never throws and retries every 5
+seconds; an exception there used to abort `OnStartup` before the poller started.
+
+**The popup is placed once per opening.** `PopupWindow.Toggle` captures an
+`Anchor` (cursor position, that monitor's work area, the taskbar edge) when the
+popup opens, and every later `Refresh` places it against that same anchor. Never
+read the cursor again while the popup is open: after a click on Refresh the
+cursor sits on that button, and re-centring on it walked the popup sideways a
+button's width on every click. That shipped in 2026.9.1 and went unnoticed until
+2026.10, because a refresh that nobody clicked (the timer) leaves the cursor
+wherever it was.
+
+**Grouped metrics are not quota.** Since CLI 1.25.0, `metrics` also carries one
+row per live Claude Code session (its context window, `group: "Sessions"`), and
+SuperGrok files product slices under `group: "Breakdown"`. A session at 90% of
+its context is not a quota at 90%, yet counting it painted the tray red while
+every real quota sat at 29%. `Renderer.QuotaMetrics` lets grouped rows count only
+when an entry has nothing else, the partition upstream applies in its own
+frontends, and the popup draws them compactly under their heading.
+
+**A failed poll keeps the last good report, for a while.** `Poller.WithLastGood`
+republishes the previous report with `RefreshError` set for up to 15 minutes, and
+the popup and tooltip say how old it is. Past that, the System Error card is
+shown, since numbers that old would mislead. Do not drop the age from the UI:
+stale numbers presented as current are worse than no numbers.
 
 **Distinguish "no file" from "cannot read this file" before writing.** Falling
 back to an empty table for both meant one unreadable moment (a hand-edited typo,
@@ -436,10 +522,13 @@ the second case, and the write is skipped. Writes also go through a temp file an
 a rename, so a crash mid-write cannot truncate a file full of credentials.
 
 **Entry ids are not vendor slugs.** A named account is `anthropic@work` and a
-custom provider is `custom:<id>`, while `root.primary` is always the bare vendor.
-Comparing them directly meant a user with named accounts had no primary at all,
-so `ShouldShow` dropped an expired login on the vendor they care about, and the
-tray went grey instead of red. Compare through `Renderer.VendorSlug`.
+custom provider is `custom:<id>`. `root.primary` is an entry id since CLI 1.21.0
+(the first account of the configured vendor) but a bare vendor before that, and
+the local config always holds a bare vendor. Comparing raw ids meant a user with
+named accounts had no primary at all, so `ShouldShow` dropped an expired login on
+the vendor they care about, and the tray went grey instead of red. Compare
+through `Renderer.VendorSlug`, on both sides, which also keeps every account of
+the primary vendor visible. `settings apply` takes a vendor, never an account id.
 
 **The tooltip tag comes from the CLI's `short_name`.** It is unique per vendor
 and the CLI validates uniqueness for custom providers too. The hardcoded table

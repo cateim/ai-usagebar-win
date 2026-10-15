@@ -22,6 +22,16 @@ public partial class PopupWindow : Window
     private DateTimeOffset _shownAt;
     private DateTimeOffset _hiddenAt;
 
+    private bool _busy;
+    private string? _updatedText;
+
+    /// <summary>Where the popup belongs while it is open: the cursor position
+    /// at the moment it opened, the work area of that monitor and the taskbar
+    /// edge, all in device-independent pixels. Captured once per opening.</summary>
+    private sealed record Anchor(double X, double Y, Rect Work, Dock Edge);
+
+    private Anchor? _anchor;
+
     public PopupWindow()
     {
         InitializeComponent();
@@ -51,8 +61,8 @@ public partial class PopupWindow : Window
 
         Populate(cfg, root);
         Show();
-        UpdateLayout(); // realize SizeToContent so ActualWidth/Height are known
-        PositionAboveTaskbar();
+        _anchor = CaptureAnchor();
+        Place(_anchor);
         Activate();
         _visible = true;
         _shownAt = DateTimeOffset.UtcNow;
@@ -90,8 +100,26 @@ public partial class PopupWindow : Window
         // computed for the height it had when it opened, so a poll that added an
         // error line or a metric bar to an open popup grew it downwards past the
         // taskbar and off the screen.
-        UpdateLayout();
-        PositionAboveTaskbar();
+        //
+        // Against the anchor taken when it opened, never the cursor as it is
+        // now. A refresh that follows a click on Refresh finds the cursor on that
+        // button, not on the tray icon, so re-reading it re-centred the popup on
+        // the button and walked it sideways a button's width on every click (and
+        // onto another monitor, if the mouse had wandered there meanwhile).
+        Place(_anchor ??= CaptureAnchor());
+    }
+
+    /// <summary>Whether a poll is running. Safe to call while hidden, so the
+    /// footer is already right when the popup opens.</summary>
+    public void SetBusy(bool busy)
+    {
+        _busy = busy;
+        UpdateStatus();
+    }
+
+    private void UpdateStatus()
+    {
+        StatusLabel.Text = _busy ? "Updating…" : _updatedText ?? "";
     }
 
     private void Populate(Config cfg, UsageJsonRoot root)
@@ -113,6 +141,14 @@ public partial class PopupWindow : Window
             ? Visibility.Collapsed
             : Visibility.Visible;
 
+        NoticeLabel.Text = model.Notice ?? "";
+        NoticePanel.Visibility = string.IsNullOrEmpty(model.Notice)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        _updatedText = model.UpdatedText;
+        UpdateStatus();
+
         VendorsList.ItemsSource = model.Vendors;
     }
 
@@ -131,11 +167,12 @@ public partial class PopupWindow : Window
         HidePopup();
     }
 
-    /// <summary>Anchor the popup just above the taskbar, horizontally near the
-    /// tray click. The work area excludes the taskbar, so its bottom edge is the
-    /// taskbar's top edge (for a bottom taskbar). Pinning the popup there keeps
-    /// it above the taskbar regardless of where the cursor was.</summary>
-    private void PositionAboveTaskbar()
+    /// <summary>Reads where the popup should go: just above the taskbar,
+    /// horizontally near the tray click. The work area excludes the taskbar, so
+    /// its bottom edge is the taskbar's top edge (for a bottom taskbar). Pinning
+    /// the popup there keeps it above the taskbar regardless of where the cursor
+    /// was.</summary>
+    private Anchor CaptureAnchor()
     {
         NativeMethods.GetCursorPos(out var pt);
 
@@ -152,8 +189,7 @@ public partial class PopupWindow : Window
 
         if (monitor == 0 || !NativeMethods.GetMonitorInfo(monitor, ref info))
         {
-            PositionOnPrimary(pt);
-            return;
+            return AnchorOnPrimary(pt);
         }
 
         // That monitor's scale, not this window's. The process is PerMonitorV2,
@@ -176,17 +212,19 @@ public partial class PopupWindow : Window
             (info.rcWork.Right - info.rcWork.Left) / scale,
             (info.rcWork.Bottom - info.rcWork.Top) / scale);
 
-        Place(pt.X / scale, pt.Y / scale, work, TaskbarEdge(info));
+        return new Anchor(pt.X / scale, pt.Y / scale, work, TaskbarEdge(info));
     }
 
     /// <summary>Fallback when the monitor cannot be resolved: the old primary
     /// monitor behaviour, which is right on the single-screen setup that is by
     /// far the common case.</summary>
-    private void PositionOnPrimary(NativeMethods.POINT pt)
+    private Anchor AnchorOnPrimary(NativeMethods.POINT pt)
     {
         var dpi = VisualTreeHelper.GetDpi(this);
-        Place(pt.X / dpi.DpiScaleX, pt.Y / dpi.DpiScaleY, SystemParameters.WorkArea, Dock.Bottom);
+        return new Anchor(pt.X / dpi.DpiScaleX, pt.Y / dpi.DpiScaleY, SystemParameters.WorkArea, Dock.Bottom);
     }
+
+    private const double ScreenMargin = 8;
 
     /// <summary>Which edge the taskbar is docked to, derived from the gap
     /// between the monitor and its work area.</summary>
@@ -209,12 +247,23 @@ public partial class PopupWindow : Window
     }
 
     /// <summary>Anchors the popup against the taskbar's own edge, following the
-    /// click along the other axis and clamped inside the work area.</summary>
-    private void Place(double cursorX, double cursorY, Rect work, Dock edge)
+    /// click along the other axis and clamped inside the work area. The width
+    /// is fixed, so for a given anchor only the height can change the result,
+    /// and it moves the popup away from the taskbar edge, never sideways.</summary>
+    private void Place(Anchor anchor)
     {
+        var (cursorX, cursorY, work, edge) = anchor;
+
+        // Capped to the work area before measuring, so a popup with more cards
+        // than the screen holds scrolls inside itself instead of being clamped
+        // off the top of the monitor. Then laid out, so the size used below is
+        // the one it will actually have.
+        MaxHeight = Math.Max(200, work.Height - 2 * ScreenMargin);
+        UpdateLayout();
+
         var w = ActualWidth;
         var h = ActualHeight;
-        const double margin = 8;
+        const double margin = ScreenMargin;
 
         double x, y;
 

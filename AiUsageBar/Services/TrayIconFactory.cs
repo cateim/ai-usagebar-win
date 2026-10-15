@@ -95,6 +95,13 @@ public static class TrayIconFactory
 
         // GetHicon's handle is intentionally kept: each icon lives for the
         // process, and the cache key space is bounded (see Cache).
+        //
+        // FromHandle is also what makes the cache safe to reuse. H.NotifyIcon
+        // disposes the previous Icon every time a new one is assigned, and an
+        // Icon built by FromHandle does not own its handle, so that Dispose is a
+        // no-op and the cached entry stays valid. Switching to a constructor that
+        // owns the handle (new Icon(stream), Icon.FromHandle(...).Clone()) would
+        // let the tray destroy icons this cache hands out again later.
         var icon = Icon.FromHandle(bmp.GetHicon());
         Cache[key] = icon;
         return icon;

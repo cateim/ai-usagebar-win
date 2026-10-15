@@ -1,39 +1,64 @@
 {
+  "schema_version": 1,
   "primary": "anthropic",
   "entries": [
     {
       "id": "anthropic",
       "name": "Anthropic",
       "display_name": "Anthropic",
-      "plan": "Max 20x",
+      "short_name": "cld",
+      "plan": "Claude Max 20x",
       "status": "ready",
       "stale": false,
       "error": null,
-      "fetched_at": "2026-08-27T18:00:00Z",
+      "fetched_at": "2026-10-15T18:00:00Z",
       "metrics": [
         {
           "label": "Session (5h)",
           "value": "47%",
           "percent": 47,
           "severity": "low",
-          "detail": "2h 12m",
+          "headline": "percent",
+          "detail": "Resets in 2h 12m",
           "reset_at": null
         },
         {
-          "label": "Weekly",
+          "label": "Weekly (7d)",
           "value": "78%",
           "percent": 78,
           "severity": "high",
-          "detail": "3d 3h",
+          "headline": "percent",
+          "detail": "Resets in 3d 3h",
           "reset_at": null
         },
         {
-          "label": "Sonnet (weekly)",
+          "label": "Sonnet (7d)",
           "value": "23%",
           "percent": 23,
           "severity": "low",
-          "detail": "3d 3h",
+          "headline": "percent",
+          "detail": "Resets in 3d 3h",
           "reset_at": null
+        },
+        {
+          "label": "ai-usagebar-win",
+          "value": "92%",
+          "percent": 92,
+          "severity": "critical",
+          "headline": "percent",
+          "detail": "184k / 200k tokens",
+          "reset_at": null,
+          "group": "Sessions"
+        },
+        {
+          "label": "dotfiles",
+          "value": "31%",
+          "percent": 31,
+          "severity": "low",
+          "headline": "percent",
+          "detail": "62k / 200k tokens",
+          "reset_at": null,
+          "group": "Sessions"
         }
       ],
       "sections": [
@@ -43,59 +68,86 @@
           "value": "47%",
           "percent": 47,
           "severity": "low",
-          "detail": "2h 12m",
+          "headline": "percent",
+          "detail": "Resets in 2h 12m",
           "reset_at": null
         },
         {
           "type": "metric",
-          "label": "Weekly",
+          "label": "Weekly (7d)",
           "value": "78%",
           "percent": 78,
           "severity": "high",
-          "detail": "3d 3h",
+          "headline": "percent",
+          "detail": "Resets in 3d 3h",
           "reset_at": null
         },
         {
           "type": "metric",
-          "label": "Sonnet (weekly)",
+          "label": "Sonnet (7d)",
           "value": "23%",
           "percent": 23,
           "severity": "low",
-          "detail": "3d 3h",
+          "headline": "percent",
+          "detail": "Resets in 3d 3h",
           "reset_at": null
         },
         {
           "type": "text",
           "label": "Extra usage",
           "value": "$12.50 / $50.00 (25%)"
+        },
+        {
+          "type": "metric",
+          "label": "ai-usagebar-win",
+          "value": "92%",
+          "percent": 92,
+          "severity": "critical",
+          "headline": "percent",
+          "detail": "184k / 200k tokens",
+          "reset_at": null,
+          "group": "Sessions"
+        },
+        {
+          "type": "metric",
+          "label": "dotfiles",
+          "value": "31%",
+          "percent": 31,
+          "severity": "low",
+          "headline": "percent",
+          "detail": "62k / 200k tokens",
+          "reset_at": null,
+          "group": "Sessions"
         }
-      ],
-      "short_name": "cld"
+      ]
     },
     {
       "id": "openai",
       "name": "OpenAI",
-      "display_name": "OpenAI",
+      "display_name": "Codex",
+      "short_name": "gpt",
       "plan": "Plus",
       "status": "ready",
       "stale": false,
       "error": null,
-      "fetched_at": "2026-08-27T18:00:00Z",
+      "fetched_at": "2026-10-15T18:00:00Z",
       "metrics": [
         {
           "label": "Session (5h)",
           "value": "91%",
           "percent": 91,
           "severity": "critical",
-          "detail": "1h 4m",
+          "headline": "percent",
+          "detail": "Resets in 1h 4m",
           "reset_at": null
         },
         {
-          "label": "Weekly",
+          "label": "Weekly (7d)",
           "value": "64%",
           "percent": 64,
           "severity": "mid",
-          "detail": "5d 8h",
+          "headline": "percent",
+          "detail": "Resets in 5d 8h",
           "reset_at": null
         },
         {
@@ -103,7 +155,8 @@
           "value": "30%",
           "percent": 30,
           "severity": "low",
-          "detail": "4d 23h",
+          "headline": "percent",
+          "detail": "Resets in 4d 23h",
           "reset_at": null
         }
       ],
@@ -114,16 +167,18 @@
           "value": "91%",
           "percent": 91,
           "severity": "critical",
-          "detail": "1h 4m",
+          "headline": "percent",
+          "detail": "Resets in 1h 4m",
           "reset_at": null
         },
         {
           "type": "metric",
-          "label": "Weekly",
+          "label": "Weekly (7d)",
           "value": "64%",
           "percent": 64,
           "severity": "mid",
-          "detail": "5d 8h",
+          "headline": "percent",
+          "detail": "Resets in 5d 8h",
           "reset_at": null
         },
         {
@@ -132,7 +187,8 @@
           "value": "30%",
           "percent": 30,
           "severity": "low",
-          "detail": "4d 23h",
+          "headline": "percent",
+          "detail": "Resets in 4d 23h",
           "reset_at": null
         },
         {
@@ -140,33 +196,35 @@
           "label": "Credits",
           "value": "$5.00"
         }
-      ],
-      "short_name": "gpt"
+      ]
     },
     {
       "id": "zai",
       "name": "Z.AI",
       "display_name": "Z.AI",
+      "short_name": "zai",
       "plan": "Coding Pro",
       "status": "ready",
       "stale": false,
       "error": null,
-      "fetched_at": "2026-08-27T18:00:00Z",
+      "fetched_at": "2026-10-15T18:00:00Z",
       "metrics": [
         {
           "label": "Session (5h)",
           "value": "55%",
           "percent": 55,
           "severity": "mid",
-          "detail": "3h 39m",
+          "headline": "percent",
+          "detail": "Resets in 3h 39m",
           "reset_at": null
         },
         {
-          "label": "Weekly",
+          "label": "Weekly (7d)",
           "value": "40%",
           "percent": 40,
           "severity": "low",
-          "detail": "2d 5h",
+          "headline": "percent",
+          "detail": "Resets in 2d 5h",
           "reset_at": null
         },
         {
@@ -174,7 +232,8 @@
           "value": "12%",
           "percent": 12,
           "severity": "low",
-          "detail": "17d 23h",
+          "headline": "percent",
+          "detail": "Resets in 17d 23h",
           "reset_at": null
         }
       ],
@@ -185,16 +244,18 @@
           "value": "55%",
           "percent": 55,
           "severity": "mid",
-          "detail": "3h 39m",
+          "headline": "percent",
+          "detail": "Resets in 3h 39m",
           "reset_at": null
         },
         {
           "type": "metric",
-          "label": "Weekly",
+          "label": "Weekly (7d)",
           "value": "40%",
           "percent": 40,
           "severity": "low",
-          "detail": "2d 5h",
+          "headline": "percent",
+          "detail": "Resets in 2d 5h",
           "reset_at": null
         },
         {
@@ -203,28 +264,30 @@
           "value": "12%",
           "percent": 12,
           "severity": "low",
-          "detail": "17d 23h",
+          "headline": "percent",
+          "detail": "Resets in 17d 23h",
           "reset_at": null
         }
-      ],
-      "short_name": "zai"
+      ]
     },
     {
       "id": "openrouter",
       "name": "OpenRouter",
       "display_name": "OpenRouter",
-      "plan": "OpenRouter",
+      "short_name": "opr",
+      "plan": "Pay as you go",
       "status": "ready",
       "stale": false,
       "error": null,
-      "fetched_at": "2026-08-27T18:00:00Z",
+      "fetched_at": "2026-10-15T18:00:00Z",
       "metrics": [
         {
           "label": "Credits used",
-          "value": "37%",
+          "value": "$37.42 of $100.00",
           "percent": 37,
           "severity": "low",
-          "detail": null,
+          "headline": "value",
+          "detail": "37% of the key limit",
           "reset_at": null
         }
       ],
@@ -232,10 +295,11 @@
         {
           "type": "metric",
           "label": "Credits used",
-          "value": "37%",
+          "value": "$37.42 of $100.00",
           "percent": 37,
           "severity": "low",
-          "detail": null,
+          "headline": "value",
+          "detail": "37% of the key limit",
           "reset_at": null
         },
         {
@@ -249,11 +313,6 @@
           "value": "$4.10"
         },
         {
-          "type": "text",
-          "label": "Key limit",
-          "value": "$50.00"
-        },
-        {
           "type": "block",
           "label": "Usage by period",
           "body": [
@@ -262,18 +321,18 @@
             "this month $62.58"
           ]
         }
-      ],
-      "short_name": "opr"
+      ]
     },
     {
       "id": "deepseek",
       "name": "DeepSeek",
       "display_name": "DeepSeek",
+      "short_name": "dsk",
       "plan": null,
       "status": "ready",
       "stale": false,
       "error": null,
-      "fetched_at": "2026-08-27T18:00:00Z",
+      "fetched_at": "2026-10-15T18:00:00Z",
       "metrics": [],
       "sections": [
         {
@@ -286,8 +345,7 @@
           "label": "Status",
           "value": "available"
         }
-      ],
-      "short_name": "dsk"
+      ]
     }
   ]
 }

@@ -272,8 +272,16 @@ pwsh -File scripts/capture-screenshots.ps1 -Only popup   # or settings, hover
 ```
 
 Pinning the popup is what makes this possible at all: without it, focusing the
-terminal to run the script dismisses the very window being captured. The two
-variables have no effect unless set:
+terminal to run the script dismisses the very window being captured. Running
+the `.exe` a second time also opens the popup, without a click on the tray.
+
+On more than one monitor, open the windows on a monitor running at the system
+scale (the primary one, normally). The script copies screen pixels from a process
+that is only system DPI aware, so a window on a monitor at another scale comes
+out shifted and partly blank. The popup opens under the cursor, so park the
+cursor on the primary taskbar before opening it.
+
+The two variables have no effect unless set:
 
 | Variable                   | Effect                                                                                          |
 | -------------------------- | ----------------------------------------------------------------------------------------------- |

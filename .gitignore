@@ -1,21 +1,42 @@
-# Rust (legacy, kept until the old tree is fully removed)
-/target
+# ai-usagebar-win - files that never enter the repository
 
-# .NET / WinUI build output
+# ---- Dependencies and build artefacts ----
 [Bb]in/
 [Oo]bj/
-.vs/
-*.user
 *.binlog
 AppPackages/
 BundleArtifacts/
 *.appx
 *.msix
-
-# Python bytecode from scripts/
+# Python bytecode from scripts/.
 __pycache__/
+# Rust output from the original tree, kept until the old tree is fully removed.
+/target
 
-# The bundled Rust CLI is built by the release workflow, never committed.
+# ---- Bundled binaries ----
+# The Rust CLI is built by the release workflow and embedded at publish time.
+# Regenerable and about 12 MB, so it is never committed.
 AiUsageBar/Assets/ai-usagebar.exe
 
+# ---- Environment ----
+.env
+.env.*
+!.env.example
+
+# ---- Logs ----
+*.log
+
+# ---- Generated and regenerable ----
+graphify-out/
+
+# ---- Controle de trabalho ----
+# Rascunho de trabalho, nao documentacao: muda a cada sessao e cita o que
+# ainda esta quebrado.
+CHECKLIST.md
+
+# ---- OS and editors ----
 .DS_Store
+Thumbs.db
+.vs/
+.idea/
+*.user

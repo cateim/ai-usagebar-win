@@ -1,7 +1,5 @@
 using System;
-using System.Diagnostics;
 using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -18,20 +16,33 @@ namespace AiUsageBar.Services;
 /// </summary>
 public static class VersionInfo
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+    private const string Unavailable = "unavailable";
 
-    private static Task<string>? _cliVersion;
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>The CLI's version and the path it runs from.</summary>
+    public sealed record CliInfo(string Version, string Path);
+
+    private static Task<CliInfo>? _cli;
 
     /// <summary>CalVer string as written in the .csproj, without the trailing
     /// revision .NET appends to <c>AssemblyVersion</c>.</summary>
     public static string App { get; } = ReadAppVersion();
 
-    /// <summary>Version reported by the CLI, or null when it cannot be run.
+    /// <summary>Version and path of the CLI being run.
     ///
-    /// <para>Started once per process and cached: the number cannot change while
-    /// the app is running, and reopening the settings window should not pay for
-    /// another process launch.</para></summary>
-    public static Task<string> CliAsync() => _cliVersion ??= Task.Run(ReadCliVersion);
+    /// <para>A successful read is cached for the process: the number cannot
+    /// change while the app is running, and reopening the settings window should
+    /// not pay for another process launch. A failed one is not, so a CLI that
+    /// was briefly unavailable does not stay "unavailable" until a restart.
+    /// Called from the UI thread only.</para></summary>
+    public static async Task<CliInfo> CliAsync()
+    {
+        var task = _cli ??= ReadCliAsync();
+        var info = await task;
+        if (info.Version == Unavailable && ReferenceEquals(_cli, task)) _cli = null;
+        return info;
+    }
 
     private static string ReadAppVersion()
     {
@@ -55,48 +66,31 @@ public static class VersionInfo
             : $"{version.Major}.{version.Minor}.{version.Build}";
     }
 
-    /// <summary>Runs <c>ai-usagebar --version</c>. Returns "unavailable" rather
-    /// than throwing: a missing CLI is already reported as a System Error card,
-    /// and this label must never be the thing that takes the window down.</summary>
-    private static string ReadCliVersion()
+    /// <summary>Runs <c>ai-usagebar --version</c>. Never throws: a missing CLI is
+    /// already reported as a System Error card, and this label must never be
+    /// the thing that takes the window down.
+    ///
+    /// <para>The path is resolved off the UI thread as well. Resolving it can
+    /// mean extracting the bundled CLI, or waiting on the poller doing exactly
+    /// that, and the settings window used to do it inline while opening.</para></summary>
+    private static async Task<CliInfo> ReadCliAsync()
     {
+        var path = "ai-usagebar";
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = CliBinary.Executable,
-                Arguments = "--version",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Environment = { ["NO_COLOR"] = "1" }
-            };
-
-            using var process = Process.Start(psi);
-            if (process == null) return "unavailable";
-
-            var stdout = process.StandardOutput.ReadToEnd();
-            var stderr = process.StandardError.ReadToEnd();
-
-            if (!process.WaitForExit((int)Timeout.TotalMilliseconds))
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                return "unavailable";
-            }
+            path = await Task.Run(() => CliBinary.Executable).ConfigureAwait(false);
+            var result = await CliProcess.RunAsync("--version", null, Timeout).ConfigureAwait(false);
 
             // The CLI prints "ai-usagebar 1.14.0". Matching the number rather
             // than splitting on whitespace keeps this working if upstream ever
             // decorates the line.
-            var text = string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
+            var text = string.IsNullOrWhiteSpace(result.StdOut) ? result.StdErr : result.StdOut;
             var match = Regex.Match(text, @"\d+\.\d+\.\d+");
-            return match.Success ? match.Value : "unavailable";
+            return new CliInfo(match.Success ? match.Value : Unavailable, path);
         }
         catch (Exception)
         {
-            return "unavailable";
+            return new CliInfo(Unavailable, path);
         }
     }
 }
