@@ -19,6 +19,8 @@ Releasing renames this heading to `## [X.Y.Z] - YYYY-MM-DD`, opens a fresh empty
 Unreleased above it, and updates the link references at the bottom of the file.
 -->
 
+## [2026.10.1] - 2026-10-15
+
 A robustness release, driven by two reports: the tray "freezing", and the plan
 name sometimes going missing. Both traced to concrete causes, listed below, and
 the app was brought up to date with `ai-usagebar` 1.38.0 along the way.
@@ -464,7 +466,8 @@ existed. Earlier releases:
 | 🐛 Fixed      | bug fixes                               |
 | 🔐 Security   | vulnerabilities addressed and hardening |
 
-[Unreleased]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.3...HEAD
+[Unreleased]: https://github.com/cateim/ai-usagebar-win/compare/v2026.10.1...HEAD
+[2026.10.1]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.3...v2026.10.1
 [2026.9.3]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.2...v2026.9.3
 [2026.9.2]: https://github.com/cateim/ai-usagebar-win/compare/v2026.9.1...v2026.9.2
 [2026.9.1]: https://github.com/cateim/ai-usagebar-win/compare/v2026.8.6...v2026.9.1
